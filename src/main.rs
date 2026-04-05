@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,19 +11,21 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 mod map;
+mod texture;
 use map::load_map;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
 const TARGET_FPS: u64 = 60;
+const TEXTURE_SIZE: usize = 64;
 
-const WALL_COLOR: Srgb = Srgb::new(90.0, 0.0, 140.0);
-const BACKGROUND_COLOR: Srgb = Srgb::new(30.0, 30.0, 30.0);
+const FLOOR_COLOR: Srgb = Srgb::new(50.0, 50.0, 50.0);
+const CEILING_COLOR: Srgb = Srgb::new(20.0, 20.0, 20.0);
 
 fn srgb_to_u32(color: Srgb) -> u32 {
-    let r = (color.red * 255.0) as u32;
-    let g = (color.green * 255.0) as u32;
-    let b = (color.blue * 255.0) as u32;
+    let r = color.red as u32;
+    let g = color.green as u32;
+    let b = color.blue as u32;
     (r << 16) | (g << 8) | b
 }
 
@@ -52,11 +54,13 @@ struct App {
     frame_duration: Duration,
     /// Mouse-look sensitivity in radians per pixel
     mouse_sensitivity: f64,
+    textures: HashMap<String, image::RgbImage>,
 }
 
 impl App {
     fn new() -> Self {
         let map = load_map("textures/map.png");
+        let textures = texture::load_textures("textures");
         Self {
             state: None,
             player: Player {
@@ -74,6 +78,7 @@ impl App {
             last_frame: Instant::now(),
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
+            textures,
         }
     }
 
@@ -142,9 +147,16 @@ impl App {
 
         let mut buffer = state.surface.buffer_mut().unwrap();
 
-        let bg = srgb_to_u32(BACKGROUND_COLOR);
-        for pixel in buffer.iter_mut() {
-            *pixel = bg;
+        let floor_color = srgb_to_u32(FLOOR_COLOR);
+        let ceiling_color = srgb_to_u32(CEILING_COLOR);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                if y < HEIGHT / 2 {
+                    buffer[y * WIDTH + x] = ceiling_color;
+                } else {
+                    buffer[y * WIDTH + x] = floor_color;
+                }
+            }
         }
 
         for x in 0..WIDTH {
@@ -209,15 +221,39 @@ impl App {
             };
 
             let line_height = (HEIGHT as f64 / perp_wall_dist) as i32;
-            let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2).max(0)) as usize;
-            let draw_end =
-                ((line_height / 2 + HEIGHT as i32 / 2).min(HEIGHT as i32 - 1)) as usize;
 
-            let wall_color = srgb_to_u32(WALL_COLOR);
-            let color = if side == 0 { wall_color } else { wall_color / 2 };
+            let pitch = 100;
 
+            let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2 + pitch).max(0)) as usize;
+            let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + pitch).min(HEIGHT as i32 - 1)) as usize;
+
+            let texture_number = (self.map[map_x as usize][map_y as usize]-1).to_string();
+
+            let wall_x = if side == 0 {
+                self.player.y + perp_wall_dist * ray_dir_y
+            } else {
+                self.player.x + perp_wall_dist * ray_dir_x
+            };
+            let wall_x = wall_x - wall_x.floor();
+            
+            let tex_x = {
+                let raw = (wall_x * TEXTURE_SIZE as f64) as usize;
+                let raw = raw.min(TEXTURE_SIZE - 1);
+                if (side == 0 && ray_dir_x > 0.0) || (side == 1 && ray_dir_y < 0.0) {
+                    TEXTURE_SIZE - raw - 1
+                } else {
+                    raw
+                }
+            };
+            
+            let step = 1.0 * TEXTURE_SIZE as f64 / line_height as f64;
+
+            let texture_position = (draw_start as f64 - HEIGHT as f64 / 2.0 + line_height as f64 / 2.0) * step;
             for y in draw_start..draw_end {
-                buffer[y * WIDTH + x] = color;
+                let tex_y = ((texture_position + (y - draw_start) as f64 * step) as usize) % TEXTURE_SIZE;
+                // println!("{:?}", &texture_number.clone());
+                let color = self.textures.get(&texture_number.clone()).unwrap().get_pixel(tex_x as u32, tex_y as u32);
+                buffer[y * WIDTH + x] = ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
             }
         }
 
@@ -306,4 +342,13 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new();
     event_loop.run_app(&mut app).unwrap();
+}
+
+mod tests {
+    #[test]
+    fn test_srgb_to_u32() {
+        let color = super::Srgb::new(30.0, 30.0, 30.0);
+        let color_u32 = super::srgb_to_u32(color);
+        println!("u32: {:?}", color_u32);
+    }
 }
