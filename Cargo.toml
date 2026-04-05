@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 minifb = "0.28"
-palette = 
+palette = "0.7.6"
