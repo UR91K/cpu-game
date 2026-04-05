@@ -1,19 +1,21 @@
-use minifb::{Key, Window, WindowOptions};
-use palette::Srgb;
-mod map;
+use std::collections::HashSet;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use palette::Srgb;
+use winit::application::ApplicationHandler;
+use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::{CursorGrabMode, Window, WindowId};
+
+mod map;
 use map::load_map;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
-
-const MAP_WIDTH: usize = 32;
-const MAP_HEIGHT: usize = 32;
-
-const FORWARD_KEY: Key = Key::W;
-const BACKWARD_KEY: Key = Key::S;
-const LEFT_KEY: Key = Key::A;
-const RIGHT_KEY: Key = Key::D;
+const TARGET_FPS: u64 = 60;
 
 const WALL_COLOR: Srgb = Srgb::new(90.0, 0.0, 140.0);
 const BACKGROUND_COLOR: Srgb = Srgb::new(30.0, 30.0, 30.0);
@@ -36,100 +38,156 @@ struct Player {
     rot_speed: f64,
 }
 
-fn draw_vertical_line(buffer: &mut Vec<u32>, x: usize, start: usize, end: usize, color: u32) {
-    for y in start..end {
-        buffer[y * WIDTH + x] = color;
-    }
+struct WindowState {
+    window: Arc<Window>,
+    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
 }
 
-fn main() {
-    // TODO: put all this stuff in a struct
-    let width = WIDTH;
-    let height = HEIGHT;
-    let title = "Raycaster";
-    let target_fps = 60;
-    let mut last_frame = std::time::Instant::now();
+struct App {
+    state: Option<WindowState>,
+    player: Player,
+    map: Vec<Vec<u8>>,
+    keys: HashSet<KeyCode>,
+    last_frame: Instant,
+    frame_duration: Duration,
+    /// Mouse-look sensitivity in radians per pixel
+    mouse_sensitivity: f64,
+}
 
-    let map = load_map("textures/map.png");
-    
-    let mut player = Player {
-        x: 22.0,
-        y: 12.0,
-        dir_x: -1.0,
-        dir_y: 0.0,
-        plane_x: 0.0,
-        plane_y: 0.66,
-        move_speed: 5.0,
-        rot_speed: 3.0,
-    };
+impl App {
+    fn new() -> Self {
+        let map = load_map("textures/map.png");
+        Self {
+            state: None,
+            player: Player {
+                x: 22.0,
+                y: 12.0,
+                dir_x: -1.0,
+                dir_y: 0.0,
+                plane_x: 0.0,
+                plane_y: 0.66,
+                move_speed: 5.0,
+                rot_speed: 3.0,
+            },
+            map,
+            keys: HashSet::new(),
+            last_frame: Instant::now(),
+            frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
+            mouse_sensitivity: 0.003,
+        }
+    }
 
-    let mut window = Window::new(
-        title,
-        width,
-        height,
-        WindowOptions::default(),
-    )
-    .unwrap_or_else(|e| {
-        panic!("{}", e);
-    });
+    fn rotate(&mut self, angle: f64) {
+        let (sin, cos) = angle.sin_cos();
+        let old_dir_x = self.player.dir_x;
+        self.player.dir_x = old_dir_x * cos - self.player.dir_y * sin;
+        self.player.dir_y = old_dir_x * sin + self.player.dir_y * cos;
+        let old_plane_x = self.player.plane_x;
+        self.player.plane_x = old_plane_x * cos - self.player.plane_y * sin;
+        self.player.plane_y = old_plane_x * sin + self.player.plane_y * cos;
+    }
 
-    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    fn update(&mut self, delta: f64) {
+        let move_step = self.player.move_speed * delta;
+        let rot_step = self.player.rot_speed * delta;
 
-    
-    window.set_target_fps(target_fps);
+        if self.keys.contains(&KeyCode::KeyW) {
+            if self.map[(self.player.x + self.player.dir_x * move_step) as usize]
+                [self.player.y as usize]
+                == 0
+            {
+                self.player.x += self.player.dir_x * move_step;
+            }
+            if self.map[self.player.x as usize]
+                [(self.player.y + self.player.dir_y * move_step) as usize]
+                == 0
+            {
+                self.player.y += self.player.dir_y * move_step;
+            }
+        }
+        if self.keys.contains(&KeyCode::KeyS) {
+            if self.map[(self.player.x - self.player.dir_x * move_step) as usize]
+                [self.player.y as usize]
+                == 0
+            {
+                self.player.x -= self.player.dir_x * move_step;
+            }
+            if self.map[self.player.x as usize]
+                [(self.player.y - self.player.dir_y * move_step) as usize]
+                == 0
+            {
+                self.player.y -= self.player.dir_y * move_step;
+            }
+        }
+        if self.keys.contains(&KeyCode::KeyA) {
+            self.rotate(rot_step);
+        }
+        if self.keys.contains(&KeyCode::KeyD) {
+            self.rotate(-rot_step);
+        }
+    }
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-            
-        for i in buffer.iter_mut() {
-            *i = srgb_to_u32(BACKGROUND_COLOR); // clear the buffer by setting all pixels to black
+    fn render(&mut self) {
+        let Some(state) = &mut self.state else {
+            return;
+        };
+
+        state
+            .surface
+            .resize(
+                NonZeroU32::new(WIDTH as u32).unwrap(),
+                NonZeroU32::new(HEIGHT as u32).unwrap(),
+            )
+            .unwrap();
+
+        let mut buffer = state.surface.buffer_mut().unwrap();
+
+        let bg = srgb_to_u32(BACKGROUND_COLOR);
+        for pixel in buffer.iter_mut() {
+            *pixel = bg;
         }
 
-        for x in 0..width {
-            let camera_x: f64 = 2.0 * x as f64 / width as f64 - 1.0; // x-coordinate in camera space
-            let ray_dir_x: f64 = player.dir_x + player.plane_x * camera_x;
-            let ray_dir_y: f64 = player.dir_y + player.plane_y * camera_x;
+        for x in 0..WIDTH {
+            let camera_x: f64 = 2.0 * x as f64 / WIDTH as f64 - 1.0;
+            let ray_dir_x: f64 = self.player.dir_x + self.player.plane_x * camera_x;
+            let ray_dir_y: f64 = self.player.dir_y + self.player.plane_y * camera_x;
 
-            //which box of the map we're in
-            let mut map_x = player.x as i32;
-            let mut map_y = player.y as i32;
-            
-            //length of ray from current position to next x or y-side
+            let mut map_x = self.player.x as i32;
+            let mut map_y = self.player.y as i32;
+
+            let delta_dist_x: f64 = if ray_dir_x == 0.0 {
+                1e30
+            } else {
+                (1.0 / ray_dir_x).abs()
+            };
+            let delta_dist_y: f64 = if ray_dir_y == 0.0 {
+                1e30
+            } else {
+                (1.0 / ray_dir_y).abs()
+            };
+
+            let step_x: i32;
+            let step_y: i32;
             let mut side_dist_x: f64;
             let mut side_dist_y: f64;
 
-            //length of ray from one x or y-side to next x or y-side
-            let delta_dist_x: f64 = if ray_dir_x == 0.0 { 1e30 } else { (1.0 / ray_dir_x).abs() };
-            let delta_dist_y: f64 = if ray_dir_y == 0.0 { 1e30 } else { (1.0 / ray_dir_y).abs() };
-            let perp_wall_dist: f64;
-
-            // what dir to step in x or y direction (either +1 or -1)
-            let step_x: i32; 
-            let step_y: i32;
-
-            let mut hit = 0; // did we hit a wall?
-            let mut side: i32; // was a north-south wall or a east-west wall hit?
-
-            // calculate step and initial sideDist
             if ray_dir_x < 0.0 {
                 step_x = -1;
-                side_dist_x = (player.x - map_x as f64) * delta_dist_x;
+                side_dist_x = (self.player.x - map_x as f64) * delta_dist_x;
             } else {
                 step_x = 1;
-                side_dist_x = (map_x as f64 + 1.0 - player.x) * delta_dist_x;
+                side_dist_x = (map_x as f64 + 1.0 - self.player.x) * delta_dist_x;
             }
-
             if ray_dir_y < 0.0 {
                 step_y = -1;
-                side_dist_y = (player.y - map_y as f64) * delta_dist_y;
+                side_dist_y = (self.player.y - map_y as f64) * delta_dist_y;
             } else {
                 step_y = 1;
-                side_dist_y = (map_y as f64 + 1.0 - player.y) * delta_dist_y;
+                side_dist_y = (map_y as f64 + 1.0 - self.player.y) * delta_dist_y;
             }
 
-            //perform DDA
-            side = 0;
-            while hit == 0 {
-                // jump to next map square, either in x-direction, or in y-direction
+            let mut side;
+            loop {
                 if side_dist_x < side_dist_y {
                     side_dist_x += delta_dist_x;
                     map_x += step_x;
@@ -139,85 +197,113 @@ fn main() {
                     map_y += step_y;
                     side = 1;
                 }
-                // check if the ray has hit a wall
-                if map[map_x as usize][map_y as usize] > 0 {
-                    hit = 1;
+                if self.map[map_x as usize][map_y as usize] > 0 {
+                    break;
                 }
-            }   
+            }
 
-            if side == 0 {
-                perp_wall_dist = (map_x as f64 - player.x + (1.0 - step_x as f64) / 2.0) / ray_dir_x;
+            let perp_wall_dist = if side == 0 {
+                (map_x as f64 - self.player.x + (1.0 - step_x as f64) / 2.0) / ray_dir_x
             } else {
-                perp_wall_dist = (map_y as f64 - player.y + (1.0 - step_y as f64) / 2.0) / ray_dir_y;
-            }
-
-            let line_height: i32 = (height as f64 / perp_wall_dist) as i32;
-
-            let mut draw_start = -line_height / 2 + height as i32 / 2;
-            if draw_start < 0 {
-                draw_start = 0;
-            }
-            let mut draw_end = line_height / 2 + height as i32 / 2;
-            if draw_end >= height as i32 {
-                draw_end = height as i32 - 1;
-            }
-
-            // TODO: replace this with a texture later
-            let mut color: u32 = if side == 0 {
-                // make x-sides brighter
-                srgb_to_u32(WALL_COLOR)
-            } else {
-                // make y-sides darker
-                let col = srgb_to_u32(WALL_COLOR);
-                col / 2
+                (map_y as f64 - self.player.y + (1.0 - step_y as f64) / 2.0) / ray_dir_y
             };
 
-            if side == 1 {color = color / 2;}
+            let line_height = (HEIGHT as f64 / perp_wall_dist) as i32;
+            let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2).max(0)) as usize;
+            let draw_end =
+                ((line_height / 2 + HEIGHT as i32 / 2).min(HEIGHT as i32 - 1)) as usize;
 
-            draw_vertical_line(&mut buffer, x, draw_start as usize, draw_end as usize, color);
+            let wall_color = srgb_to_u32(WALL_COLOR);
+            let color = if side == 0 { wall_color } else { wall_color / 2 };
+
+            for y in draw_start..draw_end {
+                buffer[y * WIDTH + x] = color;
+            }
         }
 
-        let frame_time = last_frame.elapsed().as_secs_f64();
-        last_frame = std::time::Instant::now();
-        let move_step = player.move_speed * frame_time;
-        let rot_step = player.rot_speed * frame_time;
-
-        if window.is_key_down(FORWARD_KEY) {
-            if map[(player.x + player.dir_x * move_step) as usize][player.y as usize] == 0 {
-                player.x += player.dir_x * move_step;
-            }
-            if map[player.x as usize][(player.y + player.dir_y * move_step) as usize] == 0 {
-                player.y += player.dir_y * move_step;
-            }
-        }
-        if window.is_key_down(BACKWARD_KEY) {
-            if map[(player.x - player.dir_x * move_step) as usize][player.y as usize] == 0 {
-                player.x -= player.dir_x * move_step;
-            }
-            if map[player.x as usize][(player.y - player.dir_y * move_step) as usize] == 0 {
-                player.y -= player.dir_y * move_step;
-            }
-        }
-        if window.is_key_down(LEFT_KEY) {
-            let old_dir_x = player.dir_x;
-            player.dir_x = player.dir_x * f64::cos(rot_step) - player.dir_y * f64::sin(rot_step);
-            player.dir_y = old_dir_x * f64::sin(rot_step) + player.dir_y * f64::cos(rot_step);
-            let old_plane_x = player.plane_x;
-            player.plane_x = player.plane_x * f64::cos(rot_step) - player.plane_y * f64::sin(rot_step);
-            player.plane_y = old_plane_x * f64::sin(rot_step) + player.plane_y * f64::cos(rot_step);
-        }
-        if window.is_key_down(RIGHT_KEY) {
-            let old_dir_x = player.dir_x;
-            player.dir_x = player.dir_x * f64::cos(-rot_step) - player.dir_y * f64::sin(-rot_step);
-            player.dir_y = old_dir_x * f64::sin(-rot_step) + player.dir_y * f64::cos(-rot_step);
-            let old_plane_x = player.plane_x;
-            player.plane_x = player.plane_x * f64::cos(-rot_step) - player.plane_y * f64::sin(-rot_step);
-            player.plane_y = old_plane_x * f64::sin(-rot_step) + player.plane_y * f64::cos(-rot_step);
-        }
-        
-        // TODO: maybe remove the unwrap and handle the error properly
-        window
-            .update_with_buffer(&buffer, width, height)
-            .unwrap();
+        buffer.present().unwrap();
     }
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let attrs = Window::default_attributes()
+            .with_title("Raycaster")
+            .with_inner_size(winit::dpi::PhysicalSize::new(WIDTH as u32, HEIGHT as u32))
+            .with_resizable(false);
+
+        let window = Arc::new(event_loop.create_window(attrs).unwrap());
+
+        // grab and hide the cursor for mouse look
+        window.set_cursor_visible(false);
+        let _ = window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
+
+        let context = softbuffer::Context::new(window.clone()).unwrap();
+        let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
+
+        self.state = Some(WindowState { window, surface });
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    if code == KeyCode::Escape {
+                        event_loop.exit();
+                        return;
+                    }
+                    match event.state {
+                        ElementState::Pressed => {
+                            self.keys.insert(code);
+                        }
+                        ElementState::Released => {
+                            self.keys.remove(&code);
+                        }
+                    }
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let delta = now.duration_since(self.last_frame).as_secs_f64();
+                self.last_frame = now;
+                self.update(delta);
+                self.render();
+            }
+            _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        // Mouse motion drives horizontal look
+        if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
+            self.rotate(-dx * self.mouse_sensitivity);
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Sleep for the remainder of the frame budget, then request a redraw.
+        // This caps CPU usage to ~TARGET_FPS instead of spinning at max speed.
+        let elapsed = self.last_frame.elapsed();
+        if elapsed < self.frame_duration {
+            std::thread::sleep(self.frame_duration - elapsed);
+        }
+        if let Some(state) = &self.state {
+            state.window.request_redraw();
+        }
+    }
+}
+
+fn main() {
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
+    let mut app = App::new();
+    event_loop.run_app(&mut app).unwrap();
 }
