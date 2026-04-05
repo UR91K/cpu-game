@@ -55,6 +55,8 @@ struct App {
     /// Mouse-look sensitivity in radians per pixel
     mouse_sensitivity: f64,
     textures: HashMap<String, image::RgbImage>,
+    /// Vertical horizon offset in pixels (positive = look down)
+    pitch: i32,
 }
 
 impl App {
@@ -79,6 +81,7 @@ impl App {
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
             textures,
+            pitch: 0,
         }
     }
 
@@ -149,9 +152,10 @@ impl App {
 
         let floor_color = srgb_to_u32(FLOOR_COLOR);
         let ceiling_color = srgb_to_u32(CEILING_COLOR);
+        let horizon = (HEIGHT as i32 / 2 + self.pitch).clamp(0, HEIGHT as i32) as usize;
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
-                if y < HEIGHT / 2 {
+                if y < horizon {
                     buffer[y * WIDTH + x] = ceiling_color;
                 } else {
                     buffer[y * WIDTH + x] = floor_color;
@@ -222,10 +226,8 @@ impl App {
 
             let line_height = (HEIGHT as f64 / perp_wall_dist) as i32;
 
-            let pitch = 100;
-
-            let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2 + pitch).max(0)) as usize;
-            let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + pitch).min(HEIGHT as i32 - 1)) as usize;
+            let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2 + self.pitch).max(0)) as usize;
+            let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + self.pitch).min(HEIGHT as i32 - 1)) as usize;
 
             let texture_number = (self.map[map_x as usize][map_y as usize]-1).to_string();
 
@@ -248,11 +250,11 @@ impl App {
             
             let step = 1.0 * TEXTURE_SIZE as f64 / line_height as f64;
 
-            let texture_position = (draw_start as f64 - HEIGHT as f64 / 2.0 + line_height as f64 / 2.0) * step;
+            let texture = self.textures.get(&texture_number).unwrap();
+            let texture_position = (draw_start as f64 - self.pitch as f64 - HEIGHT as f64 / 2.0 + line_height as f64 / 2.0) * step;
             for y in draw_start..draw_end {
                 let tex_y = ((texture_position + (y - draw_start) as f64 * step) as usize) % TEXTURE_SIZE;
-                // println!("{:?}", &texture_number.clone());
-                let color = self.textures.get(&texture_number.clone()).unwrap().get_pixel(tex_x as u32, tex_y as u32);
+                let color = texture.get_pixel(tex_x as u32, tex_y as u32);
                 buffer[y * WIDTH + x] = ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
             }
         }
@@ -324,13 +326,11 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Sleep for the remainder of the frame budget, then request a redraw.
-        // This caps CPU usage to ~TARGET_FPS instead of spinning at max speed.
-        let elapsed = self.last_frame.elapsed();
-        if elapsed < self.frame_duration {
-            std::thread::sleep(self.frame_duration - elapsed);
-        }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Schedule the next redraw at exactly the next frame deadline,
+        // letting the OS sleep the thread instead of spinning.
+        let next_frame = self.last_frame + self.frame_duration;
+        event_loop.set_control_flow(ControlFlow::WaitUntil(next_frame));
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
@@ -339,6 +339,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     let event_loop = EventLoop::new().unwrap();
+    // WaitUntil is set per-frame in about_to_wait; no need for Poll here.
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new();
     event_loop.run_app(&mut app).unwrap();
