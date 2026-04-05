@@ -1,5 +1,8 @@
 use minifb::{Key, Window, WindowOptions};
 use palette::Srgb;
+mod map;
+
+use map::load_map;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
@@ -12,43 +15,6 @@ const BACKWARD_KEY: Key = Key::S;
 const LEFT_KEY: Key = Key::A;
 const RIGHT_KEY: Key = Key::D;
 
-// 2d array of 32x32 representing the world map, where 0 is empty space and 1 is a wall
-// TODO: load this from a bitmap instead of hardcoding it, and maybe add more types of walls and objects in the future
-const WORLD_MAP: [[u8; MAP_WIDTH]; MAP_HEIGHT] = [
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-];
-
 const WALL_COLOR: Srgb = Srgb::new(90.0, 0.0, 140.0);
 const BACKGROUND_COLOR: Srgb = Srgb::new(30.0, 30.0, 30.0);
 
@@ -58,8 +24,6 @@ fn srgb_to_u32(color: Srgb) -> u32 {
     let b = (color.blue * 255.0) as u32;
     (r << 16) | (g << 8) | b
 }
-
-
 
 struct Player {
     x: f64,
@@ -86,6 +50,7 @@ fn main() {
     let target_fps = 60;
     let mut last_frame = std::time::Instant::now();
 
+    let map = load_map("textures/map.png");
     
     let mut player = Player {
         x: 22.0,
@@ -95,7 +60,7 @@ fn main() {
         plane_x: 0.0,
         plane_y: 0.66,
         move_speed: 5.0,
-        rot_speed: 1.0,
+        rot_speed: 3.0,
     };
 
     let mut window = Window::new(
@@ -175,7 +140,7 @@ fn main() {
                     side = 1;
                 }
                 // check if the ray has hit a wall
-                if WORLD_MAP[map_x as usize][map_y as usize] > 0 {
+                if map[map_x as usize][map_y as usize] > 0 {
                     hit = 1;
                 }
             }   
@@ -203,7 +168,8 @@ fn main() {
                 srgb_to_u32(WALL_COLOR)
             } else {
                 // make y-sides darker
-                srgb_to_u32(WALL_COLOR * 0.5)
+                let col = srgb_to_u32(WALL_COLOR);
+                col / 2
             };
 
             if side == 1 {color = color / 2;}
@@ -217,18 +183,18 @@ fn main() {
         let rot_step = player.rot_speed * frame_time;
 
         if window.is_key_down(FORWARD_KEY) {
-            if WORLD_MAP[(player.x + player.dir_x * move_step) as usize][player.y as usize] == 0 {
+            if map[(player.x + player.dir_x * move_step) as usize][player.y as usize] == 0 {
                 player.x += player.dir_x * move_step;
             }
-            if WORLD_MAP[player.x as usize][(player.y + player.dir_y * move_step) as usize] == 0 {
+            if map[player.x as usize][(player.y + player.dir_y * move_step) as usize] == 0 {
                 player.y += player.dir_y * move_step;
             }
         }
         if window.is_key_down(BACKWARD_KEY) {
-            if WORLD_MAP[(player.x - player.dir_x * move_step) as usize][player.y as usize] == 0 {
+            if map[(player.x - player.dir_x * move_step) as usize][player.y as usize] == 0 {
                 player.x -= player.dir_x * move_step;
             }
-            if WORLD_MAP[player.x as usize][(player.y - player.dir_y * move_step) as usize] == 0 {
+            if map[player.x as usize][(player.y - player.dir_y * move_step) as usize] == 0 {
                 player.y -= player.dir_y * move_step;
             }
         }
