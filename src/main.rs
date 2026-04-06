@@ -42,6 +42,12 @@ struct Player {
     friction: f64,
 }
 
+struct Sprite {
+    x: f64,
+    y: f64,
+    texture_index: usize,
+}
+
 struct WindowState {
     window: Arc<Window>,
     surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
@@ -50,6 +56,7 @@ struct WindowState {
 struct App {
     state: Option<WindowState>,
     player: Player,
+    sprites: Vec<Sprite>,
     map: Vec<Vec<u8>>,
     keys: HashSet<KeyCode>,
     last_frame: Instant,
@@ -68,8 +75,8 @@ impl App {
         Self {
             state: None,
             player: Player {
-                x: 22.0,
-                y: 12.0,
+                x: 21.0,
+                y: 11.0,
                 dir_x: -1.0,
                 dir_y: 0.0,
                 plane_x: 0.0,
@@ -79,6 +86,15 @@ impl App {
                 vel_y: 0.0,
                 friction: 10.0,
             },
+            // TODO: replace this with empty vec and populate with actual sprites from map/server
+            // or just get the sprite data from the entities when they are added.
+            sprites: vec![
+                Sprite {
+                    x: 21.0,
+                    y: 11.0,
+                    texture_index: 3,
+                }
+            ],
             map,
             keys: HashSet::new(),
             last_frame: Instant::now(),
@@ -163,7 +179,8 @@ impl App {
                 NonZeroU32::new(HEIGHT as u32).unwrap(),
             )
             .unwrap();
-
+        
+        let mut z_buffer = vec![0.0f64; WIDTH];
         let mut buffer = state.surface.buffer_mut().unwrap();
 
         let floor_color = srgb_to_u32(FLOOR_COLOR);
@@ -179,6 +196,7 @@ impl App {
             }
         }
 
+        // draw walls
         for x in 0..WIDTH {
             let camera_x: f64 = 2.0 * x as f64 / WIDTH as f64 - 1.0;
             let ray_dir_x: f64 = self.player.dir_x + self.player.plane_x * camera_x;
@@ -278,6 +296,16 @@ impl App {
                 buffer[y * WIDTH + x] =
                     ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
             }
+        }
+
+        // draw sprites
+        for sprite in &self.sprites {
+                let sprite_x = sprite.x - self.player.x;
+                let sprite_y = sprite.y - self.player.y;
+
+                let inv_det = 1.0 / (self.player.plane_x * self.player.dir_y - self.player.dir_x * self.player.plane_y);
+                let transform_x = inv_det * (self.player.dir_y * sprite_x - self.player.dir_x * sprite_y);
+                let transform_y = inv_det * (-self.player.plane_y * sprite_x + self.player.plane_x * sprite_y);
         }
 
         buffer.present().unwrap();
