@@ -37,6 +37,9 @@ struct Player {
     plane_x: f64,
     plane_y: f64,
     move_speed: f64,
+    vel_x: f64,
+    vel_y: f64,
+    friction: f64,
 }
 
 struct WindowState {
@@ -55,6 +58,7 @@ struct App {
     textures: Vec<image::RgbImage>,
     pitch: i32,
     delta: f64,
+    skip_mouse_event: bool,
 }
 
 impl App {
@@ -70,7 +74,10 @@ impl App {
                 dir_y: 0.0,
                 plane_x: 0.0,
                 plane_y: 0.66,
-                move_speed: 5.0,
+                move_speed: 40.0,
+                vel_x: 0.0,
+                vel_y: 0.0,
+                friction: 10.0,
             },
             map,
             keys: HashSet::new(),
@@ -80,6 +87,7 @@ impl App {
             textures,
             pitch: 34,
             delta: 0.0,
+            skip_mouse_event: false,
         }
     }
 
@@ -94,63 +102,52 @@ impl App {
     }
 
     fn update(&mut self, delta: f64) {
-        let move_step = self.player.move_speed * delta;
+        let mut move_dir_x = 0.0f64;
+        let mut move_dir_y = 0.0f64;
 
         if self.keys.contains(&KeyCode::KeyW) {
-            if self.map[(self.player.x + self.player.dir_x * move_step) as usize]
-                [self.player.y as usize]
-                == 0
-            {
-                self.player.x += self.player.dir_x * move_step;
-            }
-            if self.map[self.player.x as usize]
-                [(self.player.y + self.player.dir_y * move_step) as usize]
-                == 0
-            {
-                self.player.y += self.player.dir_y * move_step;
-            }
+            move_dir_x += self.player.dir_x;
+            move_dir_y += self.player.dir_y;
         }
         if self.keys.contains(&KeyCode::KeyS) {
-            if self.map[(self.player.x - self.player.dir_x * move_step) as usize]
-                [self.player.y as usize]
-                == 0
-            {
-                self.player.x -= self.player.dir_x * move_step;
-            }
-            if self.map[self.player.x as usize]
-                [(self.player.y - self.player.dir_y * move_step) as usize]
-                == 0
-            {
-                self.player.y -= self.player.dir_y * move_step;
-            }
+            move_dir_x -= self.player.dir_x;
+            move_dir_y -= self.player.dir_y;
         }
         if self.keys.contains(&KeyCode::KeyA) {
-            if self.map[(self.player.x - self.player.plane_x * move_step) as usize]
-                [self.player.y as usize]
-                == 0
-            {
-                self.player.x -= self.player.plane_x * move_step;
-            }
-            if self.map[self.player.x as usize]
-                [(self.player.y - self.player.plane_y * move_step) as usize]
-                == 0
-            {
-                self.player.y -= self.player.plane_y * move_step;
-            }
+            move_dir_x -= self.player.plane_x;
+            move_dir_y -= self.player.plane_y;
         }
         if self.keys.contains(&KeyCode::KeyD) {
-            if self.map[(self.player.x + self.player.plane_x * move_step) as usize]
-                [self.player.y as usize]
-                == 0
-            {
-                self.player.x += self.player.plane_x * move_step;
+            move_dir_x += self.player.plane_x;
+            move_dir_y += self.player.plane_y;
+        }
+
+        self.player.vel_x += move_dir_x * self.player.move_speed * delta;
+        self.player.vel_y += move_dir_y * self.player.move_speed * delta;
+
+        let speed_sq = self.player.vel_x * self.player.vel_x + self.player.vel_y * self.player.vel_y;
+        if speed_sq > 0.0 {
+            let speed = speed_sq.sqrt();
+            let drop = speed * self.player.friction * delta;
+            let new_speed = (speed - drop).max(0.0);
+            if new_speed != speed {
+                self.player.vel_x *= new_speed / speed;
+                self.player.vel_y *= new_speed / speed;
             }
-            if self.map[self.player.x as usize]
-                [(self.player.y + self.player.plane_y * move_step) as usize]
-                == 0
-            {
-                self.player.y += self.player.plane_y * move_step;
-            }
+        }
+
+        let dx = self.player.vel_x * delta;
+        let dy = self.player.vel_y * delta;
+
+        if self.map[(self.player.x + dx) as usize][self.player.y as usize] == 0 {
+            self.player.x += dx;
+        } else {
+            self.player.vel_x = 0.0;
+        }
+        if self.map[self.player.x as usize][(self.player.y + dy) as usize] == 0 {
+            self.player.y += dy;
+        } else {
+            self.player.vel_y = 0.0;
         }
     }
 
@@ -341,7 +338,16 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
+            if self.skip_mouse_event {
+                self.skip_mouse_event = false;
+                return;
+            }
             self.rotate(-dx * self.mouse_sensitivity);
+            if let Some(state) = &self.state {
+                let center = winit::dpi::PhysicalPosition::new(WIDTH as f64 / 2.0, HEIGHT as f64 / 2.0);
+                let _ = state.window.set_cursor_position(center);
+                self.skip_mouse_event = true;
+            }
         }
     }
 
