@@ -7,6 +7,7 @@ pub const TICK_RATE: u64 = 64;
 pub const TICK_DT: f64 = 1.0 / TICK_RATE as f64;
 pub const MOVE_SPEED: f64 = 40.0;
 pub const FRICTION: f64 = 10.0;
+const PLAYER_SPRITE_TEXTURE_INDEX: usize = 3;
 
 #[derive(Clone, Debug)]
 pub struct PlayerState {
@@ -59,6 +60,15 @@ pub fn tick(state: &GameState, inputs: &[InputMessage], map: &Map, delta: f64) -
     for msg in inputs {
         apply_input(&mut next, msg, map, delta);
     }
+    next.sprites = next
+        .players
+        .values()
+        .map(|player| Sprite {
+            x: player.x,
+            y: player.y,
+            texture_index: PLAYER_SPRITE_TEXTURE_INDEX,
+        })
+        .collect();
     next.tick += 1;
     next
 }

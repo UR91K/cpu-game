@@ -31,14 +31,14 @@ pub struct App {
     last_frame: Instant,
     frame_duration: Duration,
     mouse_sensitivity: f64,
-    textures: Vec<image::RgbImage>,
+    textures: Vec<image::RgbaImage>,
     pitch: i32,
     current_tick: u64,
     mouse_captured: bool,
 }
 
 impl App {
-    pub fn new(server: Server, input_queue: Arc<Mutex<VecDeque<InputMessage>>>, human_id: PlayerId, textures: Vec<image::RgbImage>) -> Self {
+    pub fn new(server: Server, input_queue: Arc<Mutex<VecDeque<InputMessage>>>, human_id: PlayerId, textures: Vec<image::RgbaImage>) -> Self {
         Self {
             state: None,
             server,

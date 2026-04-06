@@ -22,7 +22,7 @@ pub fn render(
     player: &PlayerState,
     sprites: &[Sprite],
     map: &Map,
-    textures: &[image::RgbImage],
+    textures: &[image::RgbaImage],
     pitch: i32,
 ) {
     let mut z_buffer = vec![0.0f64; WIDTH];
@@ -167,10 +167,14 @@ pub fn render(
             ((sprite_height / 2 + HEIGHT as i32 / 2 + pitch).min(HEIGHT as i32 - 1)) as usize;
 
         let sprite_width = sprite_height;
-        let draw_start_x =
-            ((-sprite_width / 2 + sprite_screen_x).max(0)) as usize;
-        let draw_end_x =
-            ((sprite_width / 2 + sprite_screen_x).min(WIDTH as i32 - 1)) as usize;
+        let draw_start_x = ((-(i64::from(sprite_width)) / 2 + i64::from(sprite_screen_x))
+            .clamp(0, WIDTH as i64)) as usize;
+        let draw_end_x = (((i64::from(sprite_width)) / 2 + i64::from(sprite_screen_x))
+            .clamp(0, WIDTH as i64)) as usize;
+
+        if draw_start_x >= draw_end_x {
+            continue;
+        }
 
         let texture = &textures[sprite.texture_index];
         for sx in draw_start_x..draw_end_x {
@@ -183,8 +187,8 @@ pub fn render(
                 let d = sy as i32 - HEIGHT as i32 / 2 - pitch + sprite_height / 2;
                 let tex_y = (d * TEXTURE_SIZE as i32 / sprite_height) as u32;
                 let color = texture.get_pixel(tex_x % TEXTURE_SIZE as u32, tex_y % TEXTURE_SIZE as u32);
-                
-                if color[0] as u32 + color[1] as u32 + color[2] as u32 > 10 {
+
+                if color[3] > 0 {
                     buffer[sy * WIDTH + sx] =
                         ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
                 }

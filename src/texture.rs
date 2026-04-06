@@ -1,7 +1,7 @@
-pub fn load_textures(directory: &str) -> Vec<image::RgbImage> {
+pub fn load_textures(directory: &str) -> Vec<image::RgbaImage> {
     let paths = std::fs::read_dir(directory).expect("Failed to read textures directory");
 
-    let mut entries: Vec<(usize, image::RgbImage)> = Vec::new();
+    let mut entries: Vec<(usize, image::RgbaImage)> = Vec::new();
     for path in paths {
         let path = path.expect("Failed to read texture file").path();
         if path.is_file() {
@@ -11,7 +11,7 @@ pub fn load_textures(directory: &str) -> Vec<image::RgbImage> {
                     if let Ok(index) = stem.parse::<usize>() {
                         let img = image::open(&path)
                             .expect(&format!("Failed to open texture: {}", stem))
-                            .to_rgb8();
+                            .to_rgba8();
                         entries.push((index, img));
                     }
                 }
@@ -21,7 +21,7 @@ pub fn load_textures(directory: &str) -> Vec<image::RgbImage> {
 
     entries.sort_by_key(|(i, _)| *i);
     let max_index = entries.iter().map(|(i, _)| *i).max().unwrap_or(0);
-    let mut textures: Vec<Option<image::RgbImage>> = (0..=max_index).map(|_| None).collect();
+    let mut textures: Vec<Option<image::RgbaImage>> = (0..=max_index).map(|_| None).collect();
     for (i, img) in entries {
         textures[i] = Some(img);
     }
