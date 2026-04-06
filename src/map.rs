@@ -1,9 +1,9 @@
-use image::{RgbImage};
+use image::RgbImage;
 
 enum ColorMap {
     Wall1Colour = 0x000000, // Black
     Wall2Colour = 0x0026FF, // BLUE
-    Wall3Color = 0x00FF21, // GREEN
+    Wall3Color = 0x00FF21,  // GREEN
 }
 
 pub fn load_map(file_path: &str) -> Vec<Vec<u8>> {

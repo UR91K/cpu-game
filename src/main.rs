@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -37,7 +37,6 @@ struct Player {
     plane_x: f64,
     plane_y: f64,
     move_speed: f64,
-    rot_speed: f64,
 }
 
 struct WindowState {
@@ -52,11 +51,10 @@ struct App {
     keys: HashSet<KeyCode>,
     last_frame: Instant,
     frame_duration: Duration,
-    /// Mouse-look sensitivity in radians per pixel
     mouse_sensitivity: f64,
-    textures: HashMap<String, image::RgbImage>,
-    /// Vertical horizon offset in pixels (positive = look down)
+    textures: Vec<image::RgbImage>,
     pitch: i32,
+    delta: f64,
 }
 
 impl App {
@@ -73,7 +71,6 @@ impl App {
                 plane_x: 0.0,
                 plane_y: 0.66,
                 move_speed: 5.0,
-                rot_speed: 3.0,
             },
             map,
             keys: HashSet::new(),
@@ -81,7 +78,8 @@ impl App {
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
             textures,
-            pitch: 0,
+            pitch: 34,
+            delta: 0.0,
         }
     }
 
@@ -97,7 +95,6 @@ impl App {
 
     fn update(&mut self, delta: f64) {
         let move_step = self.player.move_speed * delta;
-        let rot_step = self.player.rot_speed * delta;
 
         if self.keys.contains(&KeyCode::KeyW) {
             if self.map[(self.player.x + self.player.dir_x * move_step) as usize]
@@ -128,10 +125,32 @@ impl App {
             }
         }
         if self.keys.contains(&KeyCode::KeyA) {
-            self.rotate(rot_step);
+            if self.map[(self.player.x - self.player.plane_x * move_step) as usize]
+                [self.player.y as usize]
+                == 0
+            {
+                self.player.x -= self.player.plane_x * move_step;
+            }
+            if self.map[self.player.x as usize]
+                [(self.player.y - self.player.plane_y * move_step) as usize]
+                == 0
+            {
+                self.player.y -= self.player.plane_y * move_step;
+            }
         }
         if self.keys.contains(&KeyCode::KeyD) {
-            self.rotate(-rot_step);
+            if self.map[(self.player.x + self.player.plane_x * move_step) as usize]
+                [self.player.y as usize]
+                == 0
+            {
+                self.player.x += self.player.plane_x * move_step;
+            }
+            if self.map[self.player.x as usize]
+                [(self.player.y + self.player.plane_y * move_step) as usize]
+                == 0
+            {
+                self.player.y += self.player.plane_y * move_step;
+            }
         }
     }
 
@@ -227,9 +246,10 @@ impl App {
             let line_height = (HEIGHT as f64 / perp_wall_dist) as i32;
 
             let draw_start = ((-line_height / 2 + HEIGHT as i32 / 2 + self.pitch).max(0)) as usize;
-            let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + self.pitch).min(HEIGHT as i32 - 1)) as usize;
+            let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + self.pitch)
+                .min(HEIGHT as i32 - 1)) as usize;
 
-            let texture_number = (self.map[map_x as usize][map_y as usize]-1).to_string();
+            let texture_index = (self.map[map_x as usize][map_y as usize] - 1) as usize;
 
             let wall_x = if side == 0 {
                 self.player.y + perp_wall_dist * ray_dir_y
@@ -237,7 +257,7 @@ impl App {
                 self.player.x + perp_wall_dist * ray_dir_x
             };
             let wall_x = wall_x - wall_x.floor();
-            
+
             let tex_x = {
                 let raw = (wall_x * TEXTURE_SIZE as f64) as usize;
                 let raw = raw.min(TEXTURE_SIZE - 1);
@@ -247,15 +267,19 @@ impl App {
                     raw
                 }
             };
-            
+
             let step = 1.0 * TEXTURE_SIZE as f64 / line_height as f64;
 
-            let texture = self.textures.get(&texture_number).unwrap();
-            let texture_position = (draw_start as f64 - self.pitch as f64 - HEIGHT as f64 / 2.0 + line_height as f64 / 2.0) * step;
+            let texture = &self.textures[texture_index];
+            let texture_position = (draw_start as f64 - self.pitch as f64 - HEIGHT as f64 / 2.0
+                + line_height as f64 / 2.0)
+                * step;
             for y in draw_start..draw_end {
-                let tex_y = ((texture_position + (y - draw_start) as f64 * step) as usize) % TEXTURE_SIZE;
+                let tex_y =
+                    ((texture_position + (y - draw_start) as f64 * step) as usize) % TEXTURE_SIZE;
                 let color = texture.get_pixel(tex_x as u32, tex_y as u32);
-                buffer[y * WIDTH + x] = ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
+                buffer[y * WIDTH + x] =
+                    ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
             }
         }
 
@@ -272,7 +296,6 @@ impl ApplicationHandler for App {
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
 
-        // grab and hide the cursor for mouse look
         window.set_cursor_visible(false);
         let _ = window
             .set_cursor_grab(CursorGrabMode::Locked)
@@ -304,10 +327,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let delta = now.duration_since(self.last_frame).as_secs_f64();
-                self.last_frame = now;
-                self.update(delta);
+                self.update(self.delta);
                 self.render();
             }
             _ => {}
@@ -320,27 +340,30 @@ impl ApplicationHandler for App {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        // Mouse motion drives horizontal look
         if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
             self.rotate(-dx * self.mouse_sensitivity);
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Schedule the next redraw at exactly the next frame deadline,
-        // letting the OS sleep the thread instead of spinning.
+        let now = Instant::now();
+        let next_frame = self.last_frame + self.frame_duration;
+
+        if now >= next_frame {
+            self.delta = now.duration_since(self.last_frame).as_secs_f64();
+            self.last_frame = now;
+            if let Some(state) = &self.state {
+                state.window.request_redraw();
+            }
+        }
+
         let next_frame = self.last_frame + self.frame_duration;
         event_loop.set_control_flow(ControlFlow::WaitUntil(next_frame));
-        if let Some(state) = &self.state {
-            state.window.request_redraw();
-        }
     }
 }
 
 fn main() {
     let event_loop = EventLoop::new().unwrap();
-    // WaitUntil is set per-frame in about_to_wait; no need for Poll here.
-    event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = App::new();
     event_loop.run_app(&mut app).unwrap();
 }
