@@ -1,17 +1,19 @@
 use image::RgbImage;
 
+use crate::model::Map;
+
 enum ColorMap {
     Wall1Colour = 0x000000, // Black
     Wall2Colour = 0x0026FF, // BLUE
     Wall3Color = 0x00FF21,  // GREEN
 }
 
-pub fn load_map(file_path: &str) -> Vec<Vec<u8>> {
+pub fn load_map(file_path: &str) -> Map {
     let img: RgbImage = image::open(file_path)
         .expect("Failed to open map image")
         .to_rgb8();
 
-    let mut map: Vec<Vec<u8>> = Vec::new();
+    let mut tiles: Vec<Vec<u8>> = Vec::new();
 
     for y in 0..img.height() {
         let mut row: Vec<u8> = Vec::new();
@@ -27,8 +29,8 @@ pub fn load_map(file_path: &str) -> Vec<Vec<u8>> {
             };
             row.push(cell_value);
         }
-        map.push(row);
+        tiles.push(row);
     }
 
-    map
+    Map::new(tiles)
 }

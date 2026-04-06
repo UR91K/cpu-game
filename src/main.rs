@@ -12,7 +12,12 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 
 mod map;
 mod texture;
+mod simulation;
+mod net;
+mod model;
 use map::load_map;
+
+use crate::model::{Map, Player, Sprite};
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 480;
@@ -29,25 +34,6 @@ fn srgb_to_u32(color: Srgb) -> u32 {
     (r << 16) | (g << 8) | b
 }
 
-struct Player {
-    x: f64,
-    y: f64,
-    dir_x: f64,
-    dir_y: f64,
-    plane_x: f64,
-    plane_y: f64,
-    move_speed: f64,
-    vel_x: f64,
-    vel_y: f64,
-    friction: f64,
-}
-
-struct Sprite {
-    x: f64,
-    y: f64,
-    texture_index: usize,
-}
-
 struct WindowState {
     window: Arc<Window>,
     surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
@@ -57,7 +43,7 @@ struct App {
     state: Option<WindowState>,
     player: Player,
     sprites: Vec<Sprite>,
-    map: Vec<Vec<u8>>,
+    map: Map,
     keys: HashSet<KeyCode>,
     last_frame: Instant,
     frame_duration: Duration,
@@ -65,7 +51,7 @@ struct App {
     textures: Vec<image::RgbImage>,
     pitch: i32,
     delta: f64,
-    skip_mouse_event: bool,
+    mouse_captured: bool,
 }
 
 impl App {
@@ -103,7 +89,22 @@ impl App {
             textures,
             pitch: 34,
             delta: 0.0,
-            skip_mouse_event: false,
+            mouse_captured: false,
+        }
+    }
+
+    fn set_mouse_capture(window: &Window, capture: bool) -> bool {
+        if capture {
+            let grabbed = window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .is_ok();
+            window.set_cursor_visible(!grabbed);
+            grabbed
+        } else {
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            window.set_cursor_visible(true);
+            false
         }
     }
 
@@ -155,12 +156,12 @@ impl App {
         let dx = self.player.vel_x * delta;
         let dy = self.player.vel_y * delta;
 
-        if self.map[(self.player.x + dx) as usize][self.player.y as usize] == 0 {
+        if !self.map.is_wall((self.player.x + dx) as usize, self.player.y as usize) {
             self.player.x += dx;
         } else {
             self.player.vel_x = 0.0;
         }
-        if self.map[self.player.x as usize][(self.player.y + dy) as usize] == 0 {
+        if !self.map.is_wall(self.player.x as usize, (self.player.y + dy) as usize) {
             self.player.y += dy;
         } else {
             self.player.vel_y = 0.0;
@@ -247,7 +248,7 @@ impl App {
                     map_y += step_y;
                     side = 1;
                 }
-                if self.map[map_x as usize][map_y as usize] > 0 {
+                if self.map.is_wall(map_x as usize, map_y as usize) {
                     break;
                 }
             }
@@ -264,7 +265,7 @@ impl App {
             let draw_end = ((line_height / 2 + HEIGHT as i32 / 2 + self.pitch)
                 .min(HEIGHT as i32 - 1)) as usize;
 
-            let texture_index = (self.map[map_x as usize][map_y as usize] - 1) as usize;
+            let texture_index = (self.map.tile_at(map_x as usize, map_y as usize) - 1) as usize;
 
             let wall_x = if side == 0 {
                 self.player.y + perp_wall_dist * ray_dir_y
@@ -321,20 +322,21 @@ impl ApplicationHandler for App {
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
 
-        window.set_cursor_visible(false);
-        let _ = window
-            .set_cursor_grab(CursorGrabMode::Locked)
-            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined));
-
         let context = softbuffer::Context::new(window.clone()).unwrap();
         let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
 
+        self.mouse_captured = Self::set_mouse_capture(window.as_ref(), true);
         self.state = Some(WindowState { window, surface });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Focused(focused) => {
+                if let Some(state) = &self.state {
+                    self.mouse_captured = Self::set_mouse_capture(state.window.as_ref(), focused);
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if code == KeyCode::Escape {
@@ -365,17 +367,11 @@ impl ApplicationHandler for App {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
-            if self.skip_mouse_event {
-                self.skip_mouse_event = false;
+        if self.mouse_captured {
+            let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event else {
                 return;
-            }
+            };
             self.rotate(-dx * self.mouse_sensitivity);
-            if let Some(state) = &self.state {
-                let center = winit::dpi::PhysicalPosition::new(WIDTH as f64 / 2.0, HEIGHT as f64 / 2.0);
-                let _ = state.window.set_cursor_position(center);
-                self.skip_mouse_event = true;
-            }
         }
     }
 
