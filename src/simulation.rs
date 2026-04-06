@@ -52,7 +52,8 @@ impl GameState {
     }
 }
 
-/// Pure tick: takes state + inputs, returns new state. No side effects.
+/// pure function to advance the simulation by applying inputs to the given state
+/// both clients and server can use this to stay in sync
 pub fn tick(state: &GameState, inputs: &[InputMessage], map: &Map, delta: f64) -> GameState {
     let mut next = state.clone();
     for msg in inputs {
@@ -67,7 +68,8 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         return;
     };
 
-    // Rotation (applied before movement so direction is up to date)
+    // rotation 
+    // apply before movement so that movement is based on the new direction immediately
     if input.rotate_delta != 0.0 {
         let angle = input.rotate_delta;
         let (sin, cos) = angle.sin_cos();
@@ -79,7 +81,7 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         player.plane_y = old_plane_x * sin + player.plane_y * cos;
     }
 
-    // Acceleration
+    // acceleration
     let mut move_dir_x = 0.0f64;
     let mut move_dir_y = 0.0f64;
     if input.forward {
@@ -101,7 +103,7 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
     player.vel_x += move_dir_x * MOVE_SPEED * delta;
     player.vel_y += move_dir_y * MOVE_SPEED * delta;
 
-    // Friction
+    // friction
     let speed_sq = player.vel_x * player.vel_x + player.vel_y * player.vel_y;
     if speed_sq > 0.0 {
         let speed = speed_sq.sqrt();
@@ -113,7 +115,7 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         }
     }
 
-    // Collision-aware movement
+    // actually move + collide with walls
     let dx = player.vel_x * delta;
     let dy = player.vel_y * delta;
     if !map.is_wall((player.x + dx) as usize, player.y as usize) {

@@ -31,7 +31,7 @@ pub fn render(
     let ceiling_color = srgb_to_u32(CEILING_COLOR);
     let horizon = (HEIGHT as i32 / 2 + pitch).clamp(0, HEIGHT as i32) as usize;
 
-    // Floor and ceiling
+    // floor + ceiling
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
             if y < horizon {
@@ -42,7 +42,7 @@ pub fn render(
         }
     }
 
-    // Walls (DDA raycaster)
+    // walls
     for x in 0..WIDTH {
         let camera_x: f64 = 2.0 * x as f64 / WIDTH as f64 - 1.0;
         let ray_dir_x: f64 = player.dir_x + player.plane_x * camera_x;
@@ -143,7 +143,7 @@ pub fn render(
         }
     }
 
-    // Sprites
+    // draw sprites
     for sprite in sprites {
         let sprite_x = sprite.x - player.x;
         let sprite_y = sprite.y - player.y;
@@ -183,7 +183,7 @@ pub fn render(
                 let d = sy as i32 - HEIGHT as i32 / 2 - pitch + sprite_height / 2;
                 let tex_y = (d * TEXTURE_SIZE as i32 / sprite_height) as u32;
                 let color = texture.get_pixel(tex_x % TEXTURE_SIZE as u32, tex_y % TEXTURE_SIZE as u32);
-                // Skip near-black pixels (treat as transparent)
+                
                 if color[0] as u32 + color[1] as u32 + color[2] as u32 > 10 {
                     buffer[sy * WIDTH + sx] =
                         ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);

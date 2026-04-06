@@ -22,7 +22,7 @@ impl BotClient {
         }
     }
 
-    /// Returns a rotation angle (radians) to steer toward the next waypoint.
+    /// get an angle to steer toward the next waypoint
     fn steer(&mut self) -> f64 {
         let state = match &self.last_state {
             Some(s) => s,
@@ -42,12 +42,12 @@ impl BotClient {
         let dy = wy - player.y;
         let dist = (dx * dx + dy * dy).sqrt();
 
-        // Advance to next waypoint when close enough
+        // advance to next waypoint when close enough
         if dist < 0.5 && self.waypoints.len() > 1 {
             self.current_waypoint = (self.current_waypoint + 1) % self.waypoints.len();
         }
 
-        // Cross product of current direction vs desired direction gives signed turn
+        // cross product of current direction vs desired direction gives signed turn
         let desired_x = dx / dist.max(1e-6);
         let desired_y = dy / dist.max(1e-6);
         let cross = player.dir_x * desired_y - player.dir_y * desired_x;

@@ -19,13 +19,13 @@ impl Server {
         }
     }
 
-    /// add a client and spawn its player at the given position.
+    /// add a client and spawn its player at the given position
     pub fn add_client(&mut self, mut client: Box<dyn Client>, spawn_x: f64, spawn_y: f64) {
         let id = client.id();
         self.state
             .players
             .insert(id, PlayerState::new(spawn_x, spawn_y));
-        // send initial state so the client is aware of the world.
+        // send initial state so the client is aware of the world
         client.receive_state(&self.state);
         self.clients.push(client);
     }

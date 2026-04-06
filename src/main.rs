@@ -19,6 +19,8 @@ use net::client::LocalClient;
 use net::server::Server;
 
 fn main() {
+
+
     let map = Arc::new(load_map("textures/map.png"));
     let textures = texture::load_textures("textures");
 
@@ -35,7 +37,6 @@ fn main() {
     );
     server.add_client(Box::new(local_client), 21.0, 11.0);
 
-    // A bot that patrols a simple square route
     let bot = BotClient::new(
         2,
         vec![(21.0, 8.0), (15.0, 8.0), (15.0, 14.0), (21.0, 14.0)],
