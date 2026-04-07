@@ -10,6 +10,58 @@ pub const TEXTURE_SIZE: usize = 64;
 const FLOOR_COLOR: Srgb = Srgb::new(50.0, 50.0, 50.0);
 const CEILING_COLOR: Srgb = Srgb::new(20.0, 20.0, 20.0);
 
+const ANIM_COLS: usize = 3;
+const ANIM_ROWS: usize = 4;
+const FRAME_W: usize = TEXTURE_SIZE;
+const FRAME_H: usize = TEXTURE_SIZE;
+const ANIM_FRAME_COUNT: u32 = 3;
+const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VisibleSide {
+    Front,
+    Back,
+    Left,
+    Right,
+}
+
+pub fn get_visible_side(entity_movement_angle: f64, camera_facing_angle: f64) -> VisibleSide {
+    const SIDE_HALF_ANGLE: f64 = 0.38050637711;
+
+    let mut rel = entity_movement_angle - camera_facing_angle;
+
+    rel = (rel + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+
+    let abs_rel = rel.abs();
+
+    if abs_rel < SIDE_HALF_ANGLE {
+        VisibleSide::Back
+    } else if abs_rel > std::f64::consts::PI - SIDE_HALF_ANGLE {
+        VisibleSide::Front
+    } else if abs_rel > std::f64::consts::FRAC_PI_2 - SIDE_HALF_ANGLE
+           && abs_rel < std::f64::consts::FRAC_PI_2 + SIDE_HALF_ANGLE
+    {
+        if rel > 0.0 { VisibleSide::Left } else { VisibleSide::Right }
+    } else if abs_rel < std::f64::consts::FRAC_PI_2 {
+        VisibleSide::Back
+    } else {
+        VisibleSide::Front
+    }
+}
+
+fn side_to_row(side: VisibleSide) -> u32 {
+    match side {
+        VisibleSide::Front => 0,
+        VisibleSide::Back => 1,
+        VisibleSide::Left => 2,
+        VisibleSide::Right => 3,
+    }
+}
+
+fn walk_frame_col(tick: u32, is_moving: bool) -> u32 {
+    if !is_moving { 1 } else { WALK_PING_PONG[(tick % 4) as usize] }
+}
+
 fn srgb_to_u32(color: Srgb) -> u32 {
     let r = color.red as u32;
     let g = color.green as u32;
