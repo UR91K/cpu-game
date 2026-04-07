@@ -1,0 +1,71 @@
+[package]
+name = "presenter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "shader_test"
+path = "src/lib.rs"
+
+[[bin]]
+name = "presenter"
+path = "src/main.rs"
+
+[[example]]
+name = "presentation_sequence"
+path = "examples/presentation_sequence.rs"
+
+[features]
+default = ["embedded-shaders"]
+embedded-shaders = []
+
+[build-dependencies]
+# Shader processing for build-time packing
+librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
+# Shader packing for embedding
+librashader-pack = { version = "0.9", features = ["serde"] }
+# MessagePack serialization
+rmp-serde = "1.3"
+# Error handling in build script
+anyhow = "1.0"
+
+[dependencies]
+# Windowing
+winit = "0.30"
+# GPU
+wgpu = "27" # Using 27 due to librashader dependency matching
+# Async runtime for wgpu
+pollster = "0.4"
+# Image loading
+image = "0.25.2"
+# Shader processing
+librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
+# Shader packing for runtime deserialization
+librashader-pack = { version = "0.9", features = ["serde"] }
+# MessagePack serialization
+rmp-serde = "1.3"
+# Sync primitives
+parking_lot = "0.12"
+# Parallel iteration
+rayon = "1.10"
+# Error handling
+anyhow = "1.0"
+# Shared types
+engine-core = { path = "../engine-core" }
+# Error handling
+thiserror = "2.0.17"
+# Testing
+proptest = "1.5"
+# Logging
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Maximum optimization
+strip = true        # Strip symbols
+panic = "abort"     # No unwinding code
+
+[profile.release.package."*"]
+opt-level = "z"     # Also optimize dependencies for size
