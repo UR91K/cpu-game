@@ -1,8 +1,9 @@
 use std::collections::{HashSet, VecDeque};
-use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use engine_core::PresentationRequest;
+use shader_test::ShaderRenderer;
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
@@ -18,7 +19,11 @@ const TARGET_FPS: u64 = 60;
 
 struct WindowState {
     window: Arc<Window>,
-    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    presenter: ShaderRenderer,
+    frame_rgb: Vec<u32>,
+    frame_rgba: Vec<u8>,
 }
 
 pub struct App {
@@ -105,23 +110,14 @@ impl App {
             return;
         };
 
-        state
-            .surface
-            .resize(
-                NonZeroU32::new(WIDTH as u32).unwrap(),
-                NonZeroU32::new(HEIGHT as u32).unwrap(),
-            )
-            .unwrap();
-
         let player = match self.server.state.players.get(&self.human_id) {
             Some(p) => p.clone(),
             None => return,
         };
         let sprites = self.server.state.sprites.clone();
 
-        let mut buffer = state.surface.buffer_mut().unwrap();
         renderer::render(
-            &mut buffer,
+            &mut state.frame_rgb,
             &player,
             &sprites,
             &self.server.map,
@@ -129,7 +125,105 @@ impl App {
             self.pitch,
             self.anim_elapsed_ms,
         );
-        buffer.present().unwrap();
+
+        for (src, dst) in state
+            .frame_rgb
+            .iter()
+            .zip(state.frame_rgba.chunks_exact_mut(4))
+        {
+            dst[0] = ((src >> 16) & 0xFF) as u8;
+            dst[1] = ((src >> 8) & 0xFF) as u8;
+            dst[2] = (src & 0xFF) as u8;
+            dst[3] = 255;
+        }
+
+        let mut request = PresentationRequest::new(
+            std::mem::take(&mut state.frame_rgba),
+            WIDTH as u32,
+            HEIGHT as u32,
+            self.current_tick,
+        );
+        state.presenter.load_presentation(&request);
+        state.frame_rgba = std::mem::take(&mut request.pixel_data);
+
+        let output = match state.surface.get_current_texture() {
+            Ok(output) => output,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                state
+                    .surface
+                    .configure(&state.presenter.device, &state.surface_config);
+                return;
+            }
+            Err(_) => {
+                return;
+            }
+        };
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder =
+            state
+                .presenter
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("cpu_game_presenter_encoder"),
+                });
+
+        let (vx, vy, vw, vh) = ShaderRenderer::calculate_aspect_preserving_viewport(
+            state.surface_config.width,
+            state.surface_config.height,
+            WIDTH as u32,
+            HEIGHT as u32,
+        );
+
+        {
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_clear_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+
+        if state
+            .presenter
+            .render_frame_to_viewport(
+                &mut encoder,
+                &view,
+                librashader::runtime::Size::new(vw, vh),
+                state.surface_config.format,
+                vx,
+                vy,
+            )
+            .is_err()
+        {
+            return;
+        }
+
+        state.presenter.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+    }
+
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            if let Some(state) = &mut self.state {
+                state.surface_config.width = new_size.width;
+                state.surface_config.height = new_size.height;
+                state
+                    .surface
+                    .configure(&state.presenter.device, &state.surface_config);
+            }
+        }
     }
 }
 
@@ -141,11 +235,62 @@ impl ApplicationHandler for App {
             .with_resizable(false);
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
-        let context = softbuffer::Context::new(window.clone()).unwrap();
-        let surface = softbuffer::Surface::new(&context, window.clone()).unwrap();
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+        let surface = instance.create_surface(window.clone()).unwrap();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
+        .unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("cpu_game_device"),
+            required_features: wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
+                | wgpu::Features::FLOAT32_FILTERABLE,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: Default::default(),
+            ..Default::default()
+        }))
+        .unwrap();
+
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
+
+        let caps = surface.get_capabilities(&adapter);
+        let surface_format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(caps.formats[0]);
+
+        let mut presenter = ShaderRenderer::new(device.clone(), queue.clone());
+        presenter.load_default_preset().unwrap();
+
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: WIDTH as u32,
+            height: HEIGHT as u32,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
 
         self.mouse_captured = Self::set_mouse_capture(window.as_ref(), true);
-        self.state = Some(WindowState { window, surface });
+        self.state = Some(WindowState {
+            window,
+            surface,
+            surface_config,
+            presenter,
+            frame_rgb: vec![0u32; WIDTH * HEIGHT],
+            frame_rgba: vec![0u8; WIDTH * HEIGHT * 4],
+        });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -156,6 +301,9 @@ impl ApplicationHandler for App {
                     self.mouse_captured =
                         Self::set_mouse_capture(state.window.as_ref(), focused);
                 }
+            }
+            WindowEvent::Resized(new_size) => {
+                self.resize(new_size);
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {

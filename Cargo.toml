@@ -5,6 +5,17 @@ edition = "2024"
 
 [dependencies]
 winit = "0.30"
-softbuffer = "0.4"
 palette = "0.7.6"
 image = "0.25.10"
+wgpu = "27"
+pollster = "0.4"
+librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
+engine-core = { path = "crates/engine-core" }
+shader_test = { package = "presenter", path = "crates/presenter" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
+panic = "abort"
