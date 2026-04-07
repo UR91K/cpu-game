@@ -7,14 +7,6 @@ edition = "2021"
 name = "shader_test"
 path = "src/lib.rs"
 
-[[bin]]
-name = "presenter"
-path = "src/main.rs"
-
-[[example]]
-name = "presentation_sequence"
-path = "examples/presentation_sequence.rs"
-
 [features]
 default = ["embedded-shaders"]
 embedded-shaders = []
@@ -30,33 +22,22 @@ rmp-serde = "1.3"
 anyhow = "1.0"
 
 [dependencies]
-# Windowing
-winit = "0.30"
 # GPU
 wgpu = "27" # Using 27 due to librashader dependency matching
-# Async runtime for wgpu
-pollster = "0.4"
-# Image loading
-image = "0.25.2"
 # Shader processing
 librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
 # Shader packing for runtime deserialization
 librashader-pack = { version = "0.9", features = ["serde"] }
 # MessagePack serialization
 rmp-serde = "1.3"
-# Sync primitives
-parking_lot = "0.12"
-# Parallel iteration
-rayon = "1.10"
 # Error handling
 anyhow = "1.0"
 # Shared types
 engine-core = { path = "../engine-core" }
-# Error handling
-thiserror = "2.0.17"
-# Testing
-proptest = "1.5"
-# Logging
+
+[dev-dependencies]
+winit = "0.30"
+pollster = "0.4"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 

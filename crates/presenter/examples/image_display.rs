@@ -1,10 +1,10 @@
-//! Shader test application - wgpu + librashader
+//! Minimal presenter reference example.
 
 use anyhow::Result;
-use tracing::{error, info};
-use engine_core::test_helpers::image_to_presentation;
-use shader_test::{ShaderRenderer, examples_common::gpu::{GpuContextBuilder, configure_surface}};
+use engine_core::PresentationRequest;
+use shader_test::ShaderRenderer;
 use std::sync::Arc;
+use tracing::{error, info};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -13,15 +13,15 @@ use winit::{
     window::{Window, WindowId},
 };
 
+const CONTENT_W: u32 = 320;
+const CONTENT_H: u32 = 240;
+
 struct App {
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
     surface_config: Option<wgpu::SurfaceConfiguration>,
     renderer: Option<ShaderRenderer>,
-    content_size: Option<librashader::runtime::Size<u32>>,
-    use_shader: bool,
-    blit_pipeline: Option<wgpu::RenderPipeline>,
-    blit_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    frame_number: u64,
 }
 
 impl App {
@@ -31,81 +31,80 @@ impl App {
             surface: None,
             surface_config: None,
             renderer: None,
-            content_size: None,
-            use_shader: true,
-            blit_pipeline: None,
-            blit_bind_group_layout: None,
+            frame_number: 0,
         }
     }
 
     fn init_wgpu(&mut self, window: Arc<Window>) -> Result<()> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
+            backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
 
         let surface = instance.create_surface(Arc::clone(&window))?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))?;
 
-        // Use shared GPU context builder
-        let gpu_context = GpuContextBuilder::new(&instance)
-            .with_backends(wgpu::Backends::DX12)
-            .with_features(
-                wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
-                    | wgpu::Features::FLOAT32_FILTERABLE
-            )
-            .with_surface(&surface)
-            .build()?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("presenter_example_device"),
+            required_features: wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
+                | wgpu::Features::FLOAT32_FILTERABLE,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: Default::default(),
+            ..Default::default()
+        }))?;
 
-        // Use shared surface configuration
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
+
         let size = window.inner_size();
-        let config = configure_surface(
-            &surface,
-            &gpu_context.adapter,
-            &gpu_context.device,
-            size.width,
-            size.height,
-        );
-        surface.configure(&gpu_context.device, &config);
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(caps.formats[0]);
 
-        // Create renderer
-        let mut renderer = ShaderRenderer::new(Arc::clone(&gpu_context.device), Arc::clone(&gpu_context.queue));
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
 
-        // Load shader preset
-        #[cfg(feature = "embedded-shaders")]
-        {
-            info!("Loading embedded shader preset...");
-            renderer.load_default_preset()?;
-            info!("Embedded shader preset loaded!");
-        }
-
-        #[cfg(not(feature = "embedded-shaders"))]
-        {
-            info!("Loading shader preset from file...");
-            renderer.load_default_preset()?;
-            info!("Shader preset loaded!");
-        }
-
-        // Load input image
-        info!("Loading input image...");
-        let img = image::open("images/t4.png")?;
-        let img = img.to_rgba8();
-        let presentation_request = image_to_presentation(&img, 0);
-        renderer.load_presentation(&presentation_request);
-        info!("Loaded image: {}x{}", presentation_request.width, presentation_request.height);
-
-        self.content_size = Some(librashader::runtime::Size::new(presentation_request.width, presentation_request.height));
-
-        // Create blit pipeline for drawing input directly
-        let (blit_pipeline, blit_bind_group_layout) = create_blit_pipeline(&gpu_context.device, config.format);
+        let mut renderer = ShaderRenderer::new(device, queue);
+        renderer.load_default_preset()?;
 
         self.window = Some(window);
         self.surface = Some(surface);
         self.surface_config = Some(config);
-        self.blit_pipeline = Some(blit_pipeline);
-        self.blit_bind_group_layout = Some(blit_bind_group_layout);
         self.renderer = Some(renderer);
-
         Ok(())
+    }
+
+    fn make_demo_frame(frame: u64) -> PresentationRequest {
+        let mut pixels = vec![0u8; (CONTENT_W * CONTENT_H * 4) as usize];
+        for y in 0..CONTENT_H {
+            for x in 0..CONTENT_W {
+                let idx = ((y * CONTENT_W + x) * 4) as usize;
+                let shift = (frame as u32) % CONTENT_W;
+                let band = ((x + shift) / 20) % 2;
+                pixels[idx] = if band == 0 { 255 } else { 24 };
+                pixels[idx + 1] = ((y * 255) / CONTENT_H) as u8;
+                pixels[idx + 2] = (((x * 255) / CONTENT_W) as u8).saturating_add(20);
+                pixels[idx + 3] = 255;
+            }
+        }
+        PresentationRequest::new(pixels, CONTENT_W, CONTENT_H, frame)
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -121,35 +120,35 @@ impl App {
     }
 
     fn render(&mut self) -> Result<()> {
-        let surface = self.surface.as_ref().unwrap();
-        let renderer = self.renderer.as_mut().unwrap();
+        let surface = self.surface.as_ref().expect("surface missing");
+        let renderer = self.renderer.as_mut().expect("renderer missing");
+
+        self.frame_number += 1;
+        let request = Self::make_demo_frame(self.frame_number);
+        renderer.load_presentation(&request);
 
         let output = surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("render_encoder"),
-            });
+        let mut encoder =
+            renderer
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("example_render_encoder"),
+                });
 
-        let config = self.surface_config.as_ref().unwrap();
-        let content_size = self.content_size.unwrap();
+        let config = self.surface_config.as_ref().expect("surface config missing");
+        let (vx, vy, vw, vh) = ShaderRenderer::calculate_aspect_preserving_viewport(
+            config.width,
+            config.height,
+            CONTENT_W,
+            CONTENT_H,
+        );
 
-        // Calculate aspect-ratio correct viewport within the window
-        let (viewport_x, viewport_y, viewport_width, viewport_height) =
-            ShaderRenderer::calculate_aspect_preserving_viewport(
-                config.width,
-                config.height,
-                content_size.width,
-                content_size.height,
-            );
-
-        // Clear the entire window to black first
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -166,39 +165,30 @@ impl App {
             });
         }
 
-        if self.use_shader {
-            // Render shader output to the calculated viewport region
-            let output_size = librashader::runtime::Size::new(viewport_width, viewport_height);
-            renderer.render_frame_to_viewport(
-                &mut encoder,
-                &view,
-                output_size,
-                config.format,
-                viewport_x,
-                viewport_y,
-            )?;
-        } else {
-            // TODO: Draw input texture directly using blit pipeline within viewport
-            // For now, just clear (shader off mode)
-        }
+        renderer.render_frame_to_viewport(
+            &mut encoder,
+            &view,
+            librashader::runtime::Size::new(vw, vh),
+            config.format,
+            vx,
+            vy,
+        )?;
 
         renderer.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-
         Ok(())
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window_attrs = Window::default_attributes()
-            .with_title("Shader Test - wgpu + librashader")
-            .with_inner_size(winit::dpi::LogicalSize::new(800, 600));
-
-        let window = Arc::new(event_loop.create_window(window_attrs).unwrap());
+        let attrs = Window::default_attributes()
+            .with_title("Presenter Reference Example")
+            .with_inner_size(winit::dpi::LogicalSize::new(960, 720));
+        let window = Arc::new(event_loop.create_window(attrs).expect("window create failed"));
 
         if let Err(e) = self.init_wgpu(Arc::clone(&window)) {
-            error!("Failed to initialize wgpu: {}", e);
+            error!(error = %e, "failed to initialize renderer");
             event_loop.exit();
             return;
         }
@@ -208,26 +198,20 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-            }
-            WindowEvent::Resized(new_size) => {
-                self.resize(new_size);
-            }
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Resized(new_size) => self.resize(new_size),
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state.is_pressed() {
-                    if let PhysicalKey::Code(KeyCode::Space) = event.physical_key {
-                        self.use_shader = !self.use_shader;
-                        info!("Shader: {}", if self.use_shader { "ON" } else { "OFF" });
-                    }
-                    if let PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
-                        event_loop.exit();
-                    }
+                if event.state.is_pressed()
+                    && matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape))
+                {
+                    event_loop.exit();
                 }
             }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.render() {
-                    error!("Render error: {}", e);
+                    error!(error = %e, "render error");
+                    event_loop.exit();
+                    return;
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -238,112 +222,19 @@ impl ApplicationHandler for App {
     }
 }
 
-/// Create a simple blit pipeline for drawing textures directly
-fn create_blit_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("blit_shader"),
-        source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),
-    });
-
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("blit_bind_group_layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    });
-
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("blit_pipeline_layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("blit_pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            ..Default::default()
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-        cache: None,
-    });
-
-    (pipeline, bind_group_layout)
-}
-
-const BLIT_SHADER: &str = r#"
-@vertex
-fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
-    // Full-screen triangle
-    let x = f32(i32(vertex_index) - 1);
-    let y = f32(i32(vertex_index & 1u) * 2 - 1);
-    return vec4<f32>(x, y, 0.0, 1.0);
-}
-
-@group(0) @binding(0) var t_texture: texture_2d<f32>;
-@group(0) @binding(1) var s_sampler: sampler;
-
-@fragment
-fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let uv = pos.xy / vec2<f32>(textureDimensions(t_texture));
-    return textureSample(t_texture, s_sampler, uv);
-}
-"#;
-
 fn main() -> Result<()> {
-    // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-
-    info!("Using DX12 backend");
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::new();
+    info!("starting presenter example");
     event_loop.run_app(&mut app)?;
-
-    info!("Application completed successfully");
     Ok(())
 }
