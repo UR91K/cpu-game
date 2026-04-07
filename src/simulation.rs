@@ -67,6 +67,15 @@ pub fn tick(state: &GameState, inputs: &[InputMessage], map: &Map, delta: f64) -
             x: player.x,
             y: player.y,
             texture_index: PLAYER_SPRITE_TEXTURE_INDEX,
+            movement_angle: {
+                let speed_sq = player.vel_x * player.vel_x + player.vel_y * player.vel_y;
+                if speed_sq > 1e-6 {
+                    player.vel_y.atan2(player.vel_x)
+                } else {
+                    player.dir_y.atan2(player.dir_x)
+                }
+            },
+            is_moving: player.vel_x * player.vel_x + player.vel_y * player.vel_y > 1e-6,
         })
         .collect();
     next.tick += 1;

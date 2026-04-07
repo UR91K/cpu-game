@@ -15,6 +15,7 @@ const ANIM_ROWS: usize = 4;
 const FRAME_W: usize = TEXTURE_SIZE;
 const FRAME_H: usize = TEXTURE_SIZE;
 const ANIM_FRAME_COUNT: u32 = 3;
+const ANIM_MS_PER_FRAME: f64 = 90.0;
 const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -26,7 +27,7 @@ pub enum VisibleSide {
 }
 
 pub fn get_visible_side(entity_movement_angle: f64, camera_facing_angle: f64) -> VisibleSide {
-    const SIDE_HALF_ANGLE: f64 = 0.38050637711;
+    const SIDE_HALF_ANGLE: f64 = 0.785398;
 
     let mut rel = entity_movement_angle - camera_facing_angle;
 
@@ -58,8 +59,12 @@ fn side_to_row(side: VisibleSide) -> u32 {
     }
 }
 
-fn walk_frame_col(tick: u32, is_moving: bool) -> u32 {
-    if !is_moving { 1 } else { WALK_PING_PONG[(tick % 4) as usize] }
+fn walk_frame_col(frame_step: u32, is_moving: bool) -> u32 {
+    if !is_moving {
+        ANIM_FRAME_COUNT / 2
+    } else {
+        WALK_PING_PONG[(frame_step % WALK_PING_PONG.len() as u32) as usize]
+    }
 }
 
 fn srgb_to_u32(color: Srgb) -> u32 {
@@ -76,6 +81,7 @@ pub fn render(
     map: &Map,
     textures: &[image::RgbaImage],
     pitch: i32,
+    anim_elapsed_ms: f64,
 ) {
     let mut z_buffer = vec![0.0f64; WIDTH];
 
@@ -196,6 +202,10 @@ pub fn render(
     }
 
     // draw sprites
+    let camera_facing_angle = player.dir_y.atan2(player.dir_x);
+    let atlas_width = ANIM_COLS * FRAME_W;
+    let atlas_height = ANIM_ROWS * FRAME_H;
+
     for sprite in sprites {
         let sprite_x = sprite.x - player.x;
         let sprite_y = sprite.y - player.y;
@@ -229,16 +239,33 @@ pub fn render(
         }
 
         let texture = &textures[sprite.texture_index];
+        let use_atlas = texture.width() as usize >= atlas_width
+            && texture.height() as usize >= atlas_height;
+        let frame_step = (anim_elapsed_ms / ANIM_MS_PER_FRAME).floor() as u32;
+        let frame_col = walk_frame_col(frame_step, sprite.is_moving) as usize;
+        let side_row = side_to_row(get_visible_side(
+            sprite.movement_angle,
+            camera_facing_angle,
+        )) as usize;
+        let frame_origin_x = if use_atlas { frame_col * FRAME_W } else { 0 };
+        let frame_origin_y = if use_atlas { side_row * FRAME_H } else { 0 };
+
         for sx in draw_start_x..draw_end_x {
-            let tex_x = ((sx as i32 - (-sprite_width / 2 + sprite_screen_x)) * TEXTURE_SIZE as i32
-                / sprite_width) as u32;
+            let tex_x = ((sx as i32 - (-sprite_width / 2 + sprite_screen_x))
+                * FRAME_W as i32
+                / sprite_width)
+                .rem_euclid(FRAME_W as i32) as usize;
             if transform_y >= z_buffer[sx] {
                 continue;
             }
             for sy in draw_start_y..draw_end_y {
                 let d = sy as i32 - HEIGHT as i32 / 2 - pitch + sprite_height / 2;
-                let tex_y = (d * TEXTURE_SIZE as i32 / sprite_height) as u32;
-                let color = texture.get_pixel(tex_x % TEXTURE_SIZE as u32, tex_y % TEXTURE_SIZE as u32);
+                let tex_y = (d * FRAME_H as i32 / sprite_height).rem_euclid(FRAME_H as i32)
+                    as usize;
+                let color = texture.get_pixel(
+                    (frame_origin_x + tex_x) as u32,
+                    (frame_origin_y + tex_y) as u32,
+                );
 
                 if color[3] > 0 {
                     buffer[sy * WIDTH + sx] =

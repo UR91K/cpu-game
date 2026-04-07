@@ -14,13 +14,13 @@ mod texture;
 
 use app::App;
 use map::load_map;
-use net::bot::BotClient;
+use net::bot::WaypointBot;
 use net::client::LocalClient;
 use net::server::Server;
 
+use crate::net::bot::Waypoint;
+
 fn main() {
-
-
     let map = Arc::new(load_map("textures/map.png"));
     let textures = texture::load_textures("textures");
 
@@ -37,11 +37,16 @@ fn main() {
     );
     server.add_client(Box::new(local_client), 21.0, 11.0);
 
-    let bot = BotClient::new(
+    let bot = WaypointBot::new(
         2,
-        vec![(21.0, 8.0), (15.0, 8.0), (15.0, 14.0), (21.0, 14.0)],
+        vec![
+            Waypoint { x: 21.0, y: 8.0 },
+            Waypoint { x: 15.0, y: 8.0 },
+            Waypoint { x: 15.0, y: 14.0 },
+            Waypoint { x: 21.0, y: 14.0 },
+        ],
     );
-    server.add_client(Box::new(bot), 15.0, 11.0);
+    server.add_client(Box::new(bot), 18.0, 11.0);
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(server, input_queue, HUMAN_ID, textures);

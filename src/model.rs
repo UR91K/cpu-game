@@ -6,6 +6,8 @@ pub struct Sprite {
     pub x: f64,
     pub y: f64,
     pub texture_index: usize,
+    pub movement_angle: f64,
+    pub is_moving: bool,
 }
 
 #[derive(Clone, Debug)]

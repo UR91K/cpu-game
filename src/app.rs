@@ -34,6 +34,7 @@ pub struct App {
     textures: Vec<image::RgbaImage>,
     pitch: i32,
     current_tick: u64,
+    anim_elapsed_ms: f64,
     mouse_captured: bool,
 }
 
@@ -51,6 +52,7 @@ impl App {
             textures,
             pitch: 34,
             current_tick: 0,
+            anim_elapsed_ms: 0.0,
             mouse_captured: false,
         }
     }
@@ -71,6 +73,7 @@ impl App {
     }
 
     fn update(&mut self, delta: f64) {
+        self.anim_elapsed_ms += delta * 1000.0;
         self.current_tick += 1;
         let msg = InputMessage {
             player_id: self.human_id,
@@ -86,7 +89,7 @@ impl App {
     }
 
     fn push_rotation(&mut self, angle: f64) {
-        // Push a rotation-only message immediately so it's included in the next server tick.
+        // push a rotation-only message immediately so it's included in the next server tick.
         self.current_tick += 1;
         let msg = InputMessage {
             player_id: self.human_id,
@@ -124,6 +127,7 @@ impl App {
             &self.server.map,
             &self.textures,
             self.pitch,
+            self.anim_elapsed_ms,
         );
         buffer.present().unwrap();
     }

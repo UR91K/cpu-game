@@ -3,16 +3,21 @@ use crate::model::PlayerId;
 use crate::simulation::GameState;
 use super::Client;
 
-pub struct BotClient {
+pub struct WaypointBot {
     pub id: PlayerId,
-    waypoints: Vec<(f64, f64)>,
+    waypoints: Vec<Waypoint>,
     current_waypoint: usize,
     last_state: Option<GameState>,
     current_tick: u64,
 }
 
-impl BotClient {
-    pub fn new(id: PlayerId, waypoints: Vec<(f64, f64)>) -> Self {
+pub struct Waypoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl WaypointBot {
+    pub fn new(id: PlayerId, waypoints: Vec<Waypoint>) -> Self {
         Self {
             id,
             waypoints,
@@ -37,9 +42,9 @@ impl BotClient {
             return 0.0;
         }
 
-        let (wx, wy) = self.waypoints[self.current_waypoint];
-        let dx = wx - player.x;
-        let dy = wy - player.y;
+        let waypoint = &self.waypoints[self.current_waypoint];
+        let dx = waypoint.x - player.x;
+        let dy = waypoint.y - player.y;
         let dist = (dx * dx + dy * dy).sqrt();
 
         // advance to next waypoint when close enough
@@ -55,7 +60,7 @@ impl BotClient {
     }
 }
 
-impl Client for BotClient {
+impl Client for WaypointBot {
     fn id(&self) -> PlayerId {
         self.id
     }
