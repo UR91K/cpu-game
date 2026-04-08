@@ -11,7 +11,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::input::InputMessage;
-use crate::model::PlayerId;
+use crate::map::build_ao;
+use crate::model::{AoField, AoParameters, PlayerId};
 use crate::net::server::Server;
 use crate::renderer::{self, HEIGHT, WIDTH};
 
@@ -29,6 +30,7 @@ struct WindowState {
 pub struct App {
     state: Option<WindowState>,
     server: Server,
+    ao: AoField,
     /// Shared queue — App pushes, LocalClient drains via poll_inputs().
     input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
     human_id: PlayerId,
@@ -45,9 +47,19 @@ pub struct App {
 
 impl App {
     pub fn new(server: Server, input_queue: Arc<Mutex<VecDeque<InputMessage>>>, human_id: PlayerId, textures: Vec<image::RgbaImage>) -> Self {
+        let ao = build_ao(
+            &server.map,
+            &AoParameters {
+                corner_strength: 0.8,
+                wall_seam_strength: 0.85,
+                minimum_light: 0.35,
+            },
+        );
+
         Self {
             state: None,
             server,
+            ao,
             input_queue,
             human_id,
             keys: HashSet::new(),
@@ -121,6 +133,7 @@ impl App {
             &player,
             &sprites,
             &self.server.map,
+            &self.ao,
             &self.textures,
             self.pitch,
             self.anim_elapsed_ms,

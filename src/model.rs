@@ -21,10 +21,22 @@ impl Map {
     }
 
     pub fn is_wall(&self, x: usize, y: usize) -> bool {
-        self.tiles[x][y] > 0
+        self.tiles[y][x] > 0
     }
 
     pub fn tile_at(&self, x: usize, y: usize) -> u8 {
-        self.tiles[x][y]
+        self.tiles[y][x]
     }
+}
+
+pub struct AoField {
+    pub width: usize,
+    pub height: usize,
+    pub corners: Vec<[u8; 4]>,
+}
+
+pub struct AoParameters {
+    pub corner_strength: f64,
+    pub wall_seam_strength: f64,
+    pub minimum_light: f64,
 }

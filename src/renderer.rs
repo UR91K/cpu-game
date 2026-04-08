@@ -1,6 +1,6 @@
 use palette::Srgb;
 
-use crate::model::{Map, Sprite};
+use crate::model::{AoField, Map, Sprite};
 use crate::simulation::PlayerState;
 
 pub const WIDTH: usize = 640;
@@ -74,11 +74,59 @@ fn srgb_to_u32(color: Srgb) -> u32 {
     (r << 16) | (g << 8) | b
 }
 
+fn lerp_u8(a: u8, b: u8, t: f64) -> u8 {
+    (a as f64 + (b as f64 - a as f64) * t.clamp(0.0, 1.0)).round() as u8
+}
+
+fn modulate_rgb_u8(r: u8, g: u8, b: u8, light: u8) -> u32 {
+    let l = light as u32;
+    let rr = (r as u32 * l) / 255;
+    let gg = (g as u32 * l) / 255;
+    let bb = (b as u32 * l) / 255;
+    (rr << 16) | (gg << 8) | bb
+}
+
+fn tile_corners(ao: &AoField, x: usize, y: usize) -> [u8; 4] {
+    if x >= ao.width || y >= ao.height {
+        return [255, 255, 255, 255];
+    }
+    ao.corners[y * ao.width + x]
+}
+
+fn wall_ao_light(ao: &AoField, x: usize, y: usize, side: i32, ray_dir_x: f64, ray_dir_y: f64, wall_u: f64) -> u8 {
+    // Sample the adjacent *floor* tile's corners rather than the wall tile itself,
+    // picking the edge of that floor tile that abuts the wall.
+    let t = wall_u.clamp(0.0, 1.0);
+
+    if side == 0 {
+        if ray_dir_x > 0.0 {
+            // Hit west face of wall; floor tile is one step left (x-1, y).
+            let [_tl, tr, br, _bl] = tile_corners(ao, x.wrapping_sub(1), y);
+            lerp_u8(tr, br, t) // right edge of that floor tile
+        } else {
+            // Hit east face of wall; floor tile is one step right (x+1, y).
+            let [tl, _tr, _br, bl] = tile_corners(ao, x + 1, y);
+            lerp_u8(tl, bl, t) // left edge of that floor tile
+        }
+    } else {
+        if ray_dir_y > 0.0 {
+            // Hit north face of wall; floor tile is one step up (x, y-1).
+            let [_tl, _tr, br, bl] = tile_corners(ao, x, y.wrapping_sub(1));
+            lerp_u8(bl, br, t) // bottom edge of that floor tile
+        } else {
+            // Hit south face of wall; floor tile is one step down (x, y+1).
+            let [tl, tr, _br, _bl] = tile_corners(ao, x, y + 1);
+            lerp_u8(tl, tr, t) // top edge of that floor tile
+        }
+    }
+}
+
 pub fn render(
     buffer: &mut [u32],
     player: &PlayerState,
     sprites: &[Sprite],
     map: &Map,
+    ao: &AoField,
     textures: &[image::RgbaImage],
     pitch: i32,
     anim_elapsed_ms: f64,
@@ -176,6 +224,15 @@ pub fn render(
             player.x + perp_wall_dist * ray_dir_x
         };
         let wall_x = wall_x - wall_x.floor();
+        let ao_light = wall_ao_light(
+            ao,
+            map_x as usize,
+            map_y as usize,
+            side,
+            ray_dir_x,
+            ray_dir_y,
+            wall_x,
+        );
 
         let tex_x = {
             let raw = (wall_x * TEXTURE_SIZE as f64) as usize;
@@ -196,8 +253,7 @@ pub fn render(
             let tex_y =
                 ((texture_position + (y - draw_start) as f64 * step) as usize) % TEXTURE_SIZE;
             let color = texture.get_pixel(tex_x as u32, tex_y as u32);
-            buffer[y * WIDTH + x] =
-                ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | (color[2] as u32);
+            buffer[y * WIDTH + x] = modulate_rgb_u8(color[0], color[1], color[2], ao_light);
         }
     }
 
