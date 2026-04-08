@@ -18,6 +18,13 @@ use crate::renderer::{self, HEIGHT, WIDTH};
 
 const TARGET_FPS: u64 = 60;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MouseCaptureMode {
+    None,
+    Locked,
+    ConfinedWarp,
+}
+
 struct WindowState {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -42,7 +49,8 @@ pub struct App {
     pitch: i32,
     current_tick: u64,
     anim_elapsed_ms: f64,
-    mouse_captured: bool,
+    mouse_capture_mode: MouseCaptureMode,
+    ignore_next_motion: bool,
 }
 
 impl App {
@@ -70,22 +78,57 @@ impl App {
             pitch: 34,
             current_tick: 0,
             anim_elapsed_ms: 0.0,
-            mouse_captured: false,
+            mouse_capture_mode: MouseCaptureMode::None,
+            ignore_next_motion: false,
         }
     }
 
-    fn set_mouse_capture(window: &Window, capture: bool) -> bool {
+    fn center_cursor(window: &Window) {
+        let size = window.inner_size();
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+        let center = winit::dpi::PhysicalPosition::new(
+            f64::from(size.width) * 0.5,
+            f64::from(size.height) * 0.5,
+        );
+        let _ = window.set_cursor_position(center);
+    }
+
+    fn set_mouse_capture(window: &Window, capture: bool) -> MouseCaptureMode {
         if capture {
-            let grabbed = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
-            window.set_cursor_visible(!grabbed);
-            grabbed
+            // On Windows, prefer Confined to keep clicks inside the game window.
+            if cfg!(target_os = "windows") {
+                if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                    window.set_cursor_visible(false);
+                    Self::center_cursor(window);
+                    return MouseCaptureMode::ConfinedWarp;
+                }
+
+                if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                    window.set_cursor_visible(false);
+                    return MouseCaptureMode::Locked;
+                }
+            } else {
+                if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                    window.set_cursor_visible(false);
+                    return MouseCaptureMode::Locked;
+                }
+
+                if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                    window.set_cursor_visible(false);
+                    // In confined fallback mode, keep cursor centered for FPS-like behavior.
+                    Self::center_cursor(window);
+                    return MouseCaptureMode::ConfinedWarp;
+                }
+            }
+
+            window.set_cursor_visible(true);
+            MouseCaptureMode::None
         } else {
             let _ = window.set_cursor_grab(CursorGrabMode::None);
             window.set_cursor_visible(true);
-            false
+            MouseCaptureMode::None
         }
     }
 
@@ -295,7 +338,8 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &surface_config);
 
-        self.mouse_captured = Self::set_mouse_capture(window.as_ref(), true);
+        self.mouse_capture_mode = Self::set_mouse_capture(window.as_ref(), true);
+        self.ignore_next_motion = self.mouse_capture_mode != MouseCaptureMode::None;
         self.state = Some(WindowState {
             window,
             surface,
@@ -311,8 +355,9 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Focused(focused) => {
                 if let Some(state) = &self.state {
-                    self.mouse_captured =
+                    self.mouse_capture_mode =
                         Self::set_mouse_capture(state.window.as_ref(), focused);
+                    self.ignore_next_motion = self.mouse_capture_mode != MouseCaptureMode::None;
                 }
             }
             WindowEvent::Resized(new_size) => {
@@ -334,6 +379,19 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            } => {
+                if self.mouse_capture_mode == MouseCaptureMode::None {
+                    if let Some(state) = &self.state {
+                        self.mouse_capture_mode =
+                            Self::set_mouse_capture(state.window.as_ref(), true);
+                        self.ignore_next_motion =
+                            self.mouse_capture_mode != MouseCaptureMode::None;
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => {
                 self.render();
             }
@@ -347,11 +405,14 @@ impl ApplicationHandler for App {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        if self.mouse_captured {
-            let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event else {
-                return;
-            };
-            self.push_rotation(-dx * self.mouse_sensitivity);
+        if self.mouse_capture_mode != MouseCaptureMode::None {
+            if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
+                if self.ignore_next_motion {
+                    self.ignore_next_motion = false;
+                    return;
+                }
+                self.push_rotation(-dx * self.mouse_sensitivity);
+            }
         }
     }
 
@@ -364,6 +425,10 @@ impl ApplicationHandler for App {
             self.last_frame = now;
             self.update(delta);
             if let Some(state) = &self.state {
+                if self.mouse_capture_mode == MouseCaptureMode::ConfinedWarp {
+                    Self::center_cursor(state.window.as_ref());
+                    self.ignore_next_motion = true;
+                }
                 state.window.request_redraw();
             }
         }
