@@ -1,19 +1,21 @@
-pub fn load_textures(directory: &str) -> Vec<image::RgbaImage> {
-    let paths = std::fs::read_dir(directory).expect("Failed to read textures directory");
+use include_dir::{include_dir, Dir};
+
+static TEXTURES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/textures");
+
+pub fn load_textures() -> Vec<image::RgbaImage> {
+    let files = TEXTURES_DIR.files();
 
     let mut entries: Vec<(usize, image::RgbaImage)> = Vec::new();
-    for path in paths {
-        let path = path.expect("Failed to read texture file").path();
-        if path.is_file() {
-            if let Some(name) = path.file_name() {
-                if name != "map.png" {
-                    let stem = path.file_stem().unwrap().to_string_lossy().to_string();
-                    if let Ok(index) = stem.parse::<usize>() {
-                        let img = image::open(&path)
-                            .expect(&format!("Failed to open texture: {}", stem))
-                            .to_rgba8();
-                        entries.push((index, img));
-                    }
+    for file in files {
+        let path = file.path();
+        if let Some(name) = path.file_name() {
+            if name != "map.png" {
+                let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+                if let Ok(index) = stem.parse::<usize>() {
+                    let img = image::load_from_memory(file.contents())
+                        .unwrap_or_else(|_| panic!("Failed to decode embedded texture: {}", stem))
+                        .to_rgba8();
+                    entries.push((index, img));
                 }
             }
         }
@@ -34,7 +36,7 @@ pub fn load_textures(directory: &str) -> Vec<image::RgbaImage> {
 mod tests {
     #[test]
     fn test_load_textures() {
-        let textures = super::load_textures("textures");
+        let textures = super::load_textures();
         for (i, texture) in textures.iter().enumerate() {
             println!(
                 "Loaded texture: {} ({}x{})",

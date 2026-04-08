@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use winit::event_loop::EventLoop;
@@ -14,7 +13,7 @@ mod simulation;
 mod texture;
 
 use app::App;
-use map::load_map;
+use map::load_embedded_map;
 use net::bot::WaypointBot;
 use net::client::LocalClient;
 use net::server::Server;
@@ -22,11 +21,8 @@ use net::server::Server;
 use crate::net::bot::Waypoint;
 
 fn main() {
-    let asset_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("textures");
-    let map_path = asset_root.join("map.png");
-
-    let map = Arc::new(load_map(&map_path.to_string_lossy()));
-    let textures = texture::load_textures(&asset_root.to_string_lossy());
+    let map = Arc::new(load_embedded_map());
+    let textures = texture::load_textures();
 
     let mut server = Server::new(Arc::clone(&map));
 

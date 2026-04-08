@@ -1,4 +1,5 @@
 use image::RgbImage;
+use include_dir::{include_dir, Dir};
 
 use crate::model::{AoField, AoParameters, Map};
 
@@ -7,6 +8,8 @@ enum ColorMap {
     Wall2Colour = 0x0026FF, // BLUE
     Wall3Color = 0x00FF21,  // GREEN
 }
+
+static TEXTURES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/textures");
 
 pub fn build_ao(map: &Map, params: &AoParameters) -> AoField {
     let height = map.tiles.len();
@@ -92,6 +95,22 @@ pub fn load_map(file_path: &str) -> Map {
     let img: RgbImage = image::open(file_path)
         .expect("Failed to open map image")
         .to_rgb8();
+
+    map_from_image(&img)
+}
+
+pub fn load_embedded_map() -> Map {
+    let map_file = TEXTURES_DIR
+        .get_file("map.png")
+        .expect("Failed to find embedded map image: map.png");
+    let img: RgbImage = image::load_from_memory(map_file.contents())
+        .expect("Failed to decode embedded map image")
+        .to_rgb8();
+
+    map_from_image(&img)
+}
+
+fn map_from_image(img: &RgbImage) -> Map {
 
     let mut tiles: Vec<Vec<u8>> = Vec::new();
 
