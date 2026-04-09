@@ -53,10 +53,7 @@ impl ShaderRenderer {
             request.height
         );
 
-        let ow = request.width * self.composite.params.horizontal_scale;
-        let oh = request.height;
-
-        let rgba = self.composite.process(
+        let (rgba, ow, oh) = self.composite.process(
             &request.pixel_data,
             request.width as usize,
             request.height as usize,
