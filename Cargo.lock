@@ -608,7 +608,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "engine-core",
- "librashader",
+ "num-traits",
  "rayon",
  "serde",
  "wgpu",
