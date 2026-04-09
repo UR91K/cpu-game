@@ -3,7 +3,7 @@ use palette::Srgb;
 use crate::model::{AoField, Map, Sprite};
 use crate::simulation::PlayerState;
 
-pub const WIDTH: usize = 640;
+pub const WIDTH: usize = 853;
 pub const HEIGHT: usize = 480;
 pub const TEXTURE_SIZE: usize = 64;
 

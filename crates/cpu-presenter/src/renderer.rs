@@ -3,10 +3,10 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use engine_core::PresentationRequest;
-use librashader::runtime::Size;
 
 use crate::blit::BlitPipeline;
 use crate::composite::{params::CompositeParams, CompositeProcessor};
+use crate::Size;
 
 pub struct ShaderRenderer {
     pub device: Arc<wgpu::Device>,

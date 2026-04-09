@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use engine_core::PresentationRequest;
-use shader_test::ShaderRenderer;
+use shader_test::{ShaderRenderer, Size};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
@@ -254,7 +254,7 @@ impl App {
             .render_frame_to_viewport(
                 &mut encoder,
                 &view,
-                librashader::runtime::Size::new(vw, vh),
+                Size::new(vw, vh),
                 state.surface_config.format,
                 vx,
                 vy,

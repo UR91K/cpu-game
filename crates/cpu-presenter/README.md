@@ -1,9 +1,6 @@
 # cpu-presenter
 
-CPU implementation of the two-pass NTSC composite pipeline used by the legacy shader presenter.
-
-Reference source:
-- ../../full-shader.md
+CPU implementation of the two-pass NTSC composite pipeline used by the ntsc libretro shader.
 
 Mapping:
 - Pass 1 encode/demodulate: src/composite/pass1.rs

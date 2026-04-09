@@ -10,8 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0"
 engine-core = { path = "../engine-core" }
+num-traits = "0.2"
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 wgpu = "27"
-# Temporary compatibility type dependency for Size<u32> in API parity.
-librashader = { version = "0.9", default-features = false, features = ["stable", "runtime"] }
