@@ -336,8 +336,8 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &surface_config);
 
-        self.mouse_capture_mode = Self::set_mouse_capture(window.as_ref(), true);
-        self.ignore_next_motion = self.mouse_capture_mode != MouseCaptureMode::None;
+        self.mouse_capture_mode = Self::set_mouse_capture(window.as_ref(), false);
+        self.ignore_next_motion = false;
         self.state = Some(WindowState {
             window,
             surface,
@@ -353,9 +353,11 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Focused(focused) => {
                 if let Some(state) = &self.state {
-                    self.mouse_capture_mode =
-                        Self::set_mouse_capture(state.window.as_ref(), focused);
-                    self.ignore_next_motion = self.mouse_capture_mode != MouseCaptureMode::None;
+                    if !focused {
+                        self.mouse_capture_mode =
+                            Self::set_mouse_capture(state.window.as_ref(), false);
+                        self.ignore_next_motion = false;
+                    }
                 }
             }
             WindowEvent::Resized(new_size) => {
@@ -363,8 +365,14 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    if code == KeyCode::Escape {
-                        event_loop.exit();
+                    if code == KeyCode::Escape && event.state == ElementState::Pressed {
+                        if let Some(state) = &self.state {
+                            let should_capture = self.mouse_capture_mode == MouseCaptureMode::None;
+                            self.mouse_capture_mode =
+                                Self::set_mouse_capture(state.window.as_ref(), should_capture);
+                            self.ignore_next_motion =
+                                should_capture && self.mouse_capture_mode != MouseCaptureMode::None;
+                        }
                         return;
                     }
                     match event.state {
@@ -378,7 +386,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput {
-                state: ElementState::Pressed,
+                state: ElementState::Released,
                 ..
             } => {
                 if self.mouse_capture_mode == MouseCaptureMode::None {

@@ -12,7 +12,7 @@ wgpu = "27"
 pollster = "0.4"
 librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
 engine-core = { path = "crates/engine-core" }
-shader_test = { package = "presenter", path = "crates/presenter" }
+shader_test = { package = "cpu-presenter", path = "crates/cpu-presenter" }
 
 [profile.release]
 lto = true
