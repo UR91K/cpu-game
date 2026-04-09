@@ -38,7 +38,6 @@ pub struct App {
     state: Option<WindowState>,
     server: Server,
     ao: AoField,
-    /// Shared queue — App pushes, LocalClient drains via poll_inputs().
     input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
     human_id: PlayerId,
     keys: HashSet<KeyCode>,
@@ -97,7 +96,7 @@ impl App {
 
     fn set_mouse_capture(window: &Window, capture: bool) -> MouseCaptureMode {
         if capture {
-            // On Windows, prefer Confined to keep clicks inside the game window.
+            // WINDOWS: prefer Confined to keep clicks inside the game window
             if cfg!(target_os = "windows") {
                 if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
                     window.set_cursor_visible(false);
@@ -117,7 +116,6 @@ impl App {
 
                 if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
                     window.set_cursor_visible(false);
-                    // In confined fallback mode, keep cursor centered for FPS-like behavior.
                     Self::center_cursor(window);
                     return MouseCaptureMode::ConfinedWarp;
                 }
