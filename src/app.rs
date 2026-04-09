@@ -30,6 +30,8 @@ struct WindowState {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     presenter: ShaderRenderer,
+    render_width: usize,
+    render_height: usize,
     frame_rgb: Vec<u32>,
     frame_rgba: Vec<u8>,
 }
@@ -171,6 +173,8 @@ impl App {
 
         renderer::render(
             &mut state.frame_rgb,
+            state.render_width,
+            state.render_height,
             &player,
             &sprites,
             &self.server.map,
@@ -193,8 +197,8 @@ impl App {
 
         let mut request = PresentationRequest::new(
             std::mem::take(&mut state.frame_rgba),
-            WIDTH as u32,
-            HEIGHT as u32,
+            state.render_width as u32,
+            state.render_height as u32,
             self.current_tick,
         );
         state.presenter.load_presentation(&request);
@@ -227,8 +231,8 @@ impl App {
         let (vx, vy, vw, vh) = ShaderRenderer::calculate_aspect_preserving_viewport(
             state.surface_config.width,
             state.surface_config.height,
-            WIDTH as u32,
-            HEIGHT as u32,
+            state.render_width as u32,
+            state.render_height as u32,
         );
 
         {
@@ -338,13 +342,17 @@ impl ApplicationHandler for App {
 
         self.mouse_capture_mode = Self::set_mouse_capture(window.as_ref(), false);
         self.ignore_next_motion = false;
+        let render_width = WIDTH;
+        let render_height = HEIGHT;
         self.state = Some(WindowState {
             window,
             surface,
             surface_config,
             presenter,
-            frame_rgb: vec![0u32; WIDTH * HEIGHT],
-            frame_rgba: vec![0u8; WIDTH * HEIGHT * 4],
+            render_width,
+            render_height,
+            frame_rgb: vec![0u32; render_width * render_height],
+            frame_rgba: vec![0u8; render_width * render_height * 4],
         });
     }
 
