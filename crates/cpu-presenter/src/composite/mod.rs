@@ -18,12 +18,18 @@ pub struct CompositeProcessor {
     pub rgba_out: Vec<u8>,
     output_width: usize,
     output_height: usize,
+    hplan: lanczos::HorizontalPlan,
+    modulation_table: Vec<[f32; 2]>,
+    fir_plan: pass2::FirPlan,
 }
 
 impl CompositeProcessor {
     pub fn new(params: CompositeParams, src_width: usize, src_height: usize) -> Self {
         let out_w = src_width * params.horizontal_scale as usize;
         let n = out_w * src_height;
+        let hplan = lanczos::build_plan(src_width, out_w);
+        let modulation_table = pass1::build_modulation_table(out_w);
+        let fir_plan = pass2::build_plan(out_w);
         Self {
             params,
             start_time: Instant::now(),
@@ -33,6 +39,9 @@ impl CompositeProcessor {
             rgba_out: vec![0u8; n * 4],
             output_width: out_w,
             output_height: src_height,
+            hplan,
+            modulation_table,
+            fir_plan,
         }
     }
 
@@ -49,6 +58,9 @@ impl CompositeProcessor {
         self.encoded.resize(n, [0.0; 3]);
         self.decoded.resize(n, [0.0; 3]);
         self.rgba_out.resize(n * 4, 0u8);
+        self.hplan = lanczos::build_plan(src_w, desired_w);
+        self.modulation_table = pass1::build_modulation_table(desired_w);
+        self.fir_plan = pass2::build_plan(desired_w);
     }
 
     pub fn process(&mut self, pixel_data: &[u8], src_w: usize, src_h: usize) -> &[u8] {
@@ -63,6 +75,7 @@ impl CompositeProcessor {
             src_h,
             &mut self.expanded,
             self.output_width,
+            &self.hplan,
         );
 
         pass1::pass1(
@@ -72,6 +85,7 @@ impl CompositeProcessor {
             src_h,
             ntsc_field,
             &self.params,
+            &self.modulation_table,
         );
 
         pass2::pass2(
@@ -79,6 +93,7 @@ impl CompositeProcessor {
             &mut self.decoded,
             self.output_width,
             self.params.gamma_exp(),
+            &self.fir_plan,
         );
 
         self.finalize_rgba();

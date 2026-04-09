@@ -1,7 +1,5 @@
 use rayon::prelude::*;
 
-const LANCZOS_A: f32 = 3.0;
-
 #[derive(Clone, Copy)]
 struct Tap {
     src_x: u32,
@@ -22,46 +20,23 @@ pub struct HorizontalPlan {
     taps: Vec<Tap>,
 }
 
-#[inline]
-fn lanczos_kernel(x: f32) -> f32 {
-    if x.abs() < f32::EPSILON {
-        return 1.0;
-    }
-    if x.abs() >= LANCZOS_A {
-        return 0.0;
-    }
-    let px = std::f32::consts::PI * x;
-    (px.sin() / px) * ((px / LANCZOS_A).sin() / (px / LANCZOS_A))
-}
-
 pub fn build_plan(src_w: usize, dst_w: usize) -> HorizontalPlan {
     let scale = src_w as f32 / dst_w as f32;
     let mut spans = Vec::with_capacity(dst_w);
-    let mut taps = Vec::with_capacity(dst_w * 8);
+    let mut taps = Vec::with_capacity(dst_w);
 
     for dx in 0..dst_w {
+        // Nearest-neighbor sample in source pixel-center space.
         let src_x = (dx as f32 + 0.5) * scale - 0.5;
-        let x0 = (src_x - LANCZOS_A).ceil() as i32;
-        let x1 = (src_x + LANCZOS_A).floor() as i32;
+        let nearest = src_x.round().clamp(0.0, (src_w - 1) as f32) as usize;
         let start = taps.len() as u32;
-        let mut norm = 0.0f32;
-
-        for sx in x0..=x1 {
-            let clamped = sx.clamp(0, src_w as i32 - 1) as usize;
-            let weight = lanczos_kernel(src_x - sx as f32);
-            taps.push(Tap {
-                src_x: clamped as u32,
-                weight,
-            });
-            norm += weight;
-        }
+        taps.push(Tap {
+            src_x: nearest as u32,
+            weight: 1.0,
+        });
 
         let len = (taps.len() as u32 - start) as u16;
-        let inv_norm_255 = if norm.abs() > f32::EPSILON {
-            1.0 / (norm * 255.0)
-        } else {
-            1.0 / 255.0
-        };
+        let inv_norm_255 = 1.0 / 255.0;
 
         spans.push(TapSpan {
             start,

@@ -2,7 +2,35 @@ use rayon::prelude::*;
 
 use crate::composite::{colorspace::yiq2rgb, filters::*};
 
-pub fn pass2(encoded: &[[f32; 3]], decoded: &mut [[f32; 3]], width: usize, gamma_exp: f32) {
+pub struct FirPlan {
+    width: usize,
+    pairs: Vec<[u32; TAPS * 2]>,
+}
+
+pub fn build_plan(width: usize) -> FirPlan {
+    let mut pairs = Vec::with_capacity(width);
+    for x in 0..width {
+        let mut row = [0u32; TAPS * 2];
+        for tap in 0..TAPS {
+            let lx = x.saturating_sub(TAPS - tap) as u32;
+            let rx = (x + TAPS - tap).min(width - 1) as u32;
+            row[tap * 2] = lx;
+            row[tap * 2 + 1] = rx;
+        }
+        pairs.push(row);
+    }
+    FirPlan { width, pairs }
+}
+
+pub fn pass2(
+    encoded: &[[f32; 3]],
+    decoded: &mut [[f32; 3]],
+    width: usize,
+    gamma_exp: f32,
+    plan: &FirPlan,
+) {
+    assert!(width == plan.width, "FirPlan width mismatch");
+
     decoded
         .par_chunks_mut(width)
         .zip(encoded.par_chunks(width))
@@ -12,9 +40,10 @@ pub fn pass2(encoded: &[[f32; 3]], decoded: &mut [[f32; 3]], width: usize, gamma
                 let mut sig_i = 0.0f32;
                 let mut sig_q = 0.0f32;
 
+                let idx = &plan.pairs[x];
                 for tap in 0..TAPS {
-                    let lx = x.saturating_sub(TAPS - tap);
-                    let rx = (x + TAPS - tap).min(width - 1);
+                    let lx = idx[tap * 2] as usize;
+                    let rx = idx[tap * 2 + 1] as usize;
                     let [ly, li, lq] = in_line[lx];
                     let [ry, ri, rq] = in_line[rx];
 
