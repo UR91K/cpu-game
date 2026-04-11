@@ -1,5 +1,5 @@
 #[inline(always)]
-pub fn rgb2yiq(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+pub fn rgb_to_yiq(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (
         0.2989 * r + 0.5870 * g + 0.1140 * b,
         0.5959 * r - 0.2744 * g - 0.3216 * b,
@@ -8,7 +8,7 @@ pub fn rgb2yiq(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 }
 
 #[inline(always)]
-pub fn yiq2rgb(y: f32, i: f32, q: f32) -> (f32, f32, f32) {
+pub fn yiq_to_rgb(y: f32, i: f32, q: f32) -> (f32, f32, f32) {
     (
         y + 0.9560 * i + 0.6210 * q,
         y - 0.2720 * i - 0.6474 * q,

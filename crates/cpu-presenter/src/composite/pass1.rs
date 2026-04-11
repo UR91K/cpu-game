@@ -40,7 +40,7 @@ pub fn pass1(
 
             for x in 0..width {
                 let [r, g, b] = in_line[x];
-                let (y, i, q) = rgb2yiq(r, g, b);
+                let (y, i, q) = rgb_to_yiq(r, g, b);
 
                 let base = modulation_table[x];
                 let i_mod = base[0] * sign;
@@ -51,4 +51,38 @@ pub fn pass1(
                 out_line[x] = [y3, i3 * i_mod, q3 * q_mod];
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::composite::params::CompositeParams;
+
+    #[test]
+    fn dump_encoded_scanline() {
+        // A simple row: left half red, right half cyan
+        let width = 64usize;
+        let height = 1usize;
+
+        let mut expanded = vec![[0.0f32; 3]; width];
+        for x in 0..width {
+            if x < width / 2 {
+                expanded[x] = [1.0, 0.0, 0.0]; // red
+            } else {
+                expanded[x] = [0.0, 1.0, 1.0]; // cyan
+            }
+        }
+
+        let modulation_table = build_modulation_table(width);
+        let params = CompositeParams::default();
+        let mut encoded = vec![[0.0f32; 3]; width];
+
+        pass1(&expanded, &mut encoded, width, height, 0, &params, &modulation_table);
+
+        // Print as CSV: x, Y, I_modulated, Q_modulated
+        println!("x,Y,I,Q");
+        for (x, [y, i, q]) in encoded.iter().enumerate() {
+            println!("{x},{y},{i},{q}");
+        }
+    }
 }

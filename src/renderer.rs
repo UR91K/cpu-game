@@ -8,7 +8,7 @@ pub const HEIGHT: usize = 480;
 pub const TEXTURE_SIZE: usize = 64;
 const BASE_ASPECT: f64 = WIDTH as f64 / HEIGHT as f64;
 
-const FLOOR_COLOR: Srgb = Srgb::new(50.0, 50.0, 50.0);
+const FLOOR_COLOR: Srgb = Srgb::new(66.0, 119.0, 41.0);
 const CEILING_COLOR: Srgb = Srgb::new(20.0, 20.0, 20.0);
 
 const ANIM_COLS: usize = 3;

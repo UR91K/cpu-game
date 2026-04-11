@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 
-use crate::composite::{colorspace::yiq2rgb, filters::*};
+use crate::composite::{colorspace::yiq_to_rgb, filters::*};
 
 pub struct FirPlan {
     input_width: usize,
@@ -74,7 +74,7 @@ pub fn pass2(
                 sig_i += ci * CHROMA_FILTER[TAPS];
                 sig_q += cq * CHROMA_FILTER[TAPS];
 
-                let (r, g, b) = yiq2rgb(sig_y, sig_i, sig_q);
+                let (r, g, b) = yiq_to_rgb(sig_y, sig_i, sig_q);
                 out_line[x] = [
                     r.max(0.0).powf(gamma_exp),
                     g.max(0.0).powf(gamma_exp),
