@@ -21,3 +21,9 @@ codegen-units = 1
 opt-level = "z"
 strip = true
 panic = "abort"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+opt-level = 3

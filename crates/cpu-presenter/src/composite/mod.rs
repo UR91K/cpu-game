@@ -7,6 +7,7 @@ pub mod pass2;
 
 use std::time::Instant;
 
+use rayon::prelude::*;
 use params::CompositeParams;
 
 pub struct CompositeProcessor {
@@ -79,49 +80,38 @@ impl CompositeProcessor {
         let elapsed = self.start_time.elapsed().as_secs_f64();
         let ntsc_field = (elapsed * self.params.ntsc_field_rate) as u64;
 
-        lanczos::expand_horizontal(
-            pixel_data,
-            src_w,
-            src_h,
-            &mut self.expanded,
-            self.encoded_width,
-            &self.hplan,
-        );
+        let gamma_exp = self.params.gamma_exp();
+        let enc_w = self.encoded_width;
+        let out_w = self.output_width;
+        let params = &self.params;
+        let hplan = &self.hplan;
+        let modulation_table = &self.modulation_table;
+        let fir_plan = &self.fir_plan;
 
-        pass1::pass1(
-            &self.expanded,
-            &mut self.encoded,
-            self.encoded_width,
-            src_h,
-            ntsc_field,
-            &self.params,
-            &self.modulation_table,
-        );
-
-        pass2::pass2(
-            &self.encoded,
-            &mut self.decoded,
-            self.encoded_width,
-            self.output_width,
-            self.params.gamma_exp(),
-            &self.fir_plan,
-        );
-
-        self.finalize_rgba();
+        // Fused single rayon region: one barrier, all four stages per row per task.
+        // Each task does enough work (~2560 floats × 4 stages) to amortize scheduling overhead.
+        pixel_data.par_chunks(src_w * 4)
+            .zip(self.expanded.par_chunks_mut(enc_w))
+            .zip(self.encoded.par_chunks_mut(enc_w))
+            .zip(self.decoded.par_chunks_mut(out_w))
+            .zip(self.rgba_out.par_chunks_mut(out_w * 4))
+            .enumerate()
+            .for_each(|(y, ((((src_row, exp_row), enc_row), dec_row), rgba_row))| {
+                lanczos::expand_row(src_row, exp_row, hplan);
+                pass1::pass1_row(exp_row, enc_row, y, ntsc_field, params, modulation_table);
+                pass2::pass2_row(enc_row, dec_row, out_w, gamma_exp, fir_plan);
+                for (src, dst) in dec_row.iter().zip(rgba_row.chunks_exact_mut(4)) {
+                    dst[0] = (src[0].clamp(0.0, 1.0) * 255.0) as u8;
+                    dst[1] = (src[1].clamp(0.0, 1.0) * 255.0) as u8;
+                    dst[2] = (src[2].clamp(0.0, 1.0) * 255.0) as u8;
+                    dst[3] = 255;
+                }
+            });
         (
             &self.rgba_out,
             self.output_width as u32,
             self.output_height as u32,
         )
-    }
-
-    fn finalize_rgba(&mut self) {
-        for (src, dst) in self.decoded.iter().zip(self.rgba_out.chunks_exact_mut(4)) {
-            dst[0] = (src[0].clamp(0.0, 1.0) * 255.0) as u8;
-            dst[1] = (src[1].clamp(0.0, 1.0) * 255.0) as u8;
-            dst[2] = (src[2].clamp(0.0, 1.0) * 255.0) as u8;
-            dst[3] = 255;
-        }
     }
 
     pub fn output_size(&self) -> (u32, u32) {
