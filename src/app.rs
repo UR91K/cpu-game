@@ -191,6 +191,7 @@ impl App {
                 &player,
                 &sprites,
                 self.anim_elapsed_ms,
+                self.current_tick,
             );
 
         state.renderer.queue.submit(std::iter::once(encoder.finish()));

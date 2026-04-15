@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::input::InputMessage;
 use crate::model::{Map, PlayerId, Sprite};
 
+pub const PLAYER_RADIUS: f64 = 0.1;
 pub const TICK_RATE: u64 = 64;
 pub const TICK_DT: f64 = 1.0 / TICK_RATE as f64;
 pub const MOVE_SPEED: f64 = 40.0;
@@ -135,16 +136,51 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
     }
 
     // actually move + collide with walls
-    let dx = player.vel_x * delta;
-    let dy = player.vel_y * delta;
-    if !map.is_wall((player.x + dx) as usize, player.y as usize) {
-        player.x += dx;
-    } else {
-        player.vel_x = 0.0;
-    }
-    if !map.is_wall(player.x as usize, (player.y + dy) as usize) {
-        player.y += dy;
-    } else {
-        player.vel_y = 0.0;
+    player.x += player.vel_x * delta;
+    player.y += player.vel_y * delta;
+
+    // depenetration: 2 iterations handles simultaneous wall contacts (e.g. corners)
+    let map_h = map.tiles.len() as i32;
+    let map_w = if map_h > 0 { map.tiles[0].len() as i32 } else { 0 };
+    for _ in 0..2 {
+        let cx = player.x.floor() as i32;
+        let cy = player.y.floor() as i32;
+        for oy in -1..=1i32 {
+            for ox in -1..=1i32 {
+                let tx = cx + ox;
+                let ty = cy + oy;
+                if tx < 0 || ty < 0 || tx >= map_w || ty >= map_h {
+                    continue;
+                }
+                if !map.is_wall(tx as usize, ty as usize) {
+                    continue;
+                }
+                // closest point on tile AABB [tx, tx+1] x [ty, ty+1] to player centre
+                let cpx = player.x.clamp(tx as f64, (tx + 1) as f64);
+                let cpy = player.y.clamp(ty as f64, (ty + 1) as f64);
+                let nx = player.x - cpx;
+                let ny = player.y - cpy;
+                let dist_sq = nx * nx + ny * ny;
+                if dist_sq >= PLAYER_RADIUS * PLAYER_RADIUS {
+                    continue;
+                }
+                let dist = dist_sq.sqrt();
+                let (nx, ny) = if dist < 1e-10 {
+                    (1.0_f64, 0.0_f64) // inside tile centre; push in +x as fallback
+                } else {
+                    (nx / dist, ny / dist)
+                };
+                // push player out of wall
+                let penetration = PLAYER_RADIUS - dist;
+                player.x += nx * penetration;
+                player.y += ny * penetration;
+                // cancel the velocity component going into the wall
+                let vel_dot_n = player.vel_x * nx + player.vel_y * ny;
+                if vel_dot_n < 0.0 {
+                    player.vel_x -= nx * vel_dot_n;
+                    player.vel_y -= ny * vel_dot_n;
+                }
+            }
+        }
     }
 }

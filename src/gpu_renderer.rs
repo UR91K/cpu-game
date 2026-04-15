@@ -10,6 +10,11 @@ use crate::simulation::PlayerState;
 
 pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 360;
+const COMPOSITE_WIDTH: u32 = SCENE_WIDTH * 4;
+const COMPOSITE_HEIGHT: u32 = SCENE_HEIGHT;
+const DECODED_WIDTH: u32 = SCENE_WIDTH * 2;
+const DECODED_HEIGHT: u32 = SCENE_HEIGHT;
+const CHROMA_MOD_FREQ: f32 = 4.0 * std::f32::consts::PI / 15.0;
 
 const TEXTURE_SIZE: usize = 64;
 const ANIM_COLS: usize = 3;
@@ -58,6 +63,27 @@ struct SceneUniforms {
     view_proj: [[f32; 4]; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct NtscEncodeUniforms {
+    source_size: [f32; 2],
+    output_size: [f32; 2],
+    frame_phase: f32,
+    chroma_mod_freq: f32,
+    _pad0: [f32; 2],
+    mix_row0: [f32; 4],
+    mix_row1: [f32; 4],
+    mix_row2: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct NtscDecodeUniforms {
+    source_size: [f32; 2],
+    gamma_exp: f32,
+    _pad0: f32,
+}
+
 #[derive(Clone, Copy)]
 struct AtlasRect {
     u0: f32,
@@ -80,12 +106,20 @@ pub struct SceneRenderer {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     scene_view: wgpu::TextureView,
+    composite_view: wgpu::TextureView,
+    decoded_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
     scene_bind_group: wgpu::BindGroup,
+    ntsc_encode_bind_group: wgpu::BindGroup,
+    ntsc_decode_bind_group: wgpu::BindGroup,
     blit_bind_group: wgpu::BindGroup,
     scene_pipeline: wgpu::RenderPipeline,
+    ntsc_encode_pipeline: wgpu::RenderPipeline,
+    ntsc_decode_pipeline: wgpu::RenderPipeline,
     blit_pipeline: wgpu::RenderPipeline,
     scene_uniform_buffer: wgpu::Buffer,
+    ntsc_encode_uniform_buffer: wgpu::Buffer,
+    ntsc_decode_uniform_buffer: wgpu::Buffer,
     wall_vertex_buffer: wgpu::Buffer,
     wall_index_buffer: wgpu::Buffer,
     wall_index_count: u32,
@@ -167,8 +201,50 @@ impl SceneRenderer {
         });
         let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let composite_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_composite_texture"),
+            size: wgpu::Extent3d {
+                width: COMPOSITE_WIDTH,
+                height: COMPOSITE_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let composite_view = composite_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let decoded_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_decoded_texture"),
+            size: wgpu::Extent3d {
+                width: DECODED_WIDTH,
+                height: DECODED_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let decoded_view = decoded_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let scene_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("cpu_game_scene_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cpu_game_composite_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -198,6 +274,29 @@ impl SceneRenderer {
             label: Some("cpu_game_scene_uniforms"),
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let ntsc_encode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_ntsc_encode_uniforms"),
+            contents: bytemuck::bytes_of(&NtscEncodeUniforms {
+                source_size: [SCENE_WIDTH as f32, SCENE_HEIGHT as f32],
+                output_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+                frame_phase: 0.0,
+                chroma_mod_freq: CHROMA_MOD_FREQ,
+                _pad0: [0.0; 2],
+                mix_row0: [1.0, 1.0, 1.0, 0.0],
+                mix_row1: [1.0, 2.0, 0.0, 0.0],
+                mix_row2: [1.0, 0.0, 2.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let ntsc_decode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_ntsc_decode_uniforms"),
+            contents: bytemuck::bytes_of(&NtscDecodeUniforms {
+                source_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+                gamma_exp: 1.25,
+                _pad0: 0.0,
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -273,13 +372,80 @@ impl SceneRenderer {
                 },
             ],
         });
+        let post_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cpu_game_post_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let ntsc_encode_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_ntsc_encode_bg"),
+            layout: &post_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&scene_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&scene_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: ntsc_encode_uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let ntsc_decode_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_ntsc_decode_bg"),
+            layout: &post_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&composite_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&composite_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: ntsc_decode_uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
         let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cpu_game_blit_bg"),
             layout: &blit_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&scene_view),
+                    resource: wgpu::BindingResource::TextureView(&decoded_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -291,6 +457,14 @@ impl SceneRenderer {
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_scene_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_scene.wgsl").into()),
+        });
+        let ntsc_encode_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cpu_game_ntsc_encode_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_ntsc_encode.wgsl").into()),
+        });
+        let ntsc_decode_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cpu_game_ntsc_decode_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_ntsc_decode.wgsl").into()),
         });
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_blit_shader"),
@@ -337,6 +511,62 @@ impl SceneRenderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let post_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cpu_game_post_pl"),
+            bind_group_layouts: &[&post_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let ntsc_encode_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_ntsc_encode_pipeline"),
+            layout: Some(&post_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ntsc_encode_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ntsc_encode_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        let ntsc_decode_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_ntsc_decode_pipeline"),
+            layout: Some(&post_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ntsc_decode_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ntsc_decode_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
             cache: None,
@@ -392,12 +622,20 @@ impl SceneRenderer {
             device,
             queue,
             scene_view,
+            composite_view,
+            decoded_view,
             depth_view,
             scene_bind_group,
+            ntsc_encode_bind_group,
+            ntsc_decode_bind_group,
             blit_bind_group,
             scene_pipeline,
+            ntsc_encode_pipeline,
+            ntsc_decode_pipeline,
             blit_pipeline,
             scene_uniform_buffer,
+            ntsc_encode_uniform_buffer,
+            ntsc_decode_uniform_buffer,
             wall_vertex_buffer,
             wall_index_buffer,
             wall_index_count: wall_indices.len() as u32,
@@ -416,6 +654,7 @@ impl SceneRenderer {
         player: &PlayerState,
         sprites: &[Sprite],
         anim_elapsed_ms: f64,
+        frame_number: u64,
     ) {
         let view_proj = build_view_projection(player);
         self.queue.write_buffer(
@@ -424,6 +663,16 @@ impl SceneRenderer {
             bytemuck::bytes_of(&SceneUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
             }),
+        );
+        self.queue.write_buffer(
+            &self.ntsc_encode_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&build_encode_uniforms(frame_number)),
+        );
+        self.queue.write_buffer(
+            &self.ntsc_decode_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&build_decode_uniforms()),
         );
 
         let sprite_vertices = build_sprite_vertices(player, sprites, &self.atlas_rects, anim_elapsed_ms);
@@ -470,6 +719,48 @@ impl SceneRenderer {
                 pass.set_vertex_buffer(0, self.sprite_vertex_buffer.slice(..));
                 pass.draw(0..self.sprite_vertex_count, 0..1);
             }
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_ntsc_encode_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.composite_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.ntsc_encode_pipeline);
+            pass.set_bind_group(0, &self.ntsc_encode_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_ntsc_decode_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.decoded_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.ntsc_decode_pipeline);
+            pass.set_bind_group(0, &self.ntsc_decode_bind_group, &[]);
+            pass.draw(0..3, 0..1);
         }
 
         let (vx, vy, vw, vh) = viewport;
@@ -546,6 +837,27 @@ fn build_view_projection(player: &PlayerState) -> Mat4 {
         FAR_PLANE,
     );
     projection * view
+}
+
+fn build_encode_uniforms(frame_number: u64) -> NtscEncodeUniforms {
+    NtscEncodeUniforms {
+        source_size: [SCENE_WIDTH as f32, SCENE_HEIGHT as f32],
+        output_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+        frame_phase: (frame_number & 1) as f32,
+        chroma_mod_freq: CHROMA_MOD_FREQ,
+        _pad0: [0.0; 2],
+        mix_row0: [1.0, 1.0, 1.0, 0.0],
+        mix_row1: [1.0, 2.0, 0.0, 0.0],
+        mix_row2: [1.0, 0.0, 2.0, 0.0],
+    }
+}
+
+fn build_decode_uniforms() -> NtscDecodeUniforms {
+    NtscDecodeUniforms {
+        source_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+        gamma_exp: 2.5 / 2.0,
+        _pad0: 0.0,
+    }
 }
 
 fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
