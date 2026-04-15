@@ -1,6 +1,6 @@
 pub mod colorspace;
 pub mod filters;
-pub mod lanczos;
+pub mod nearest;
 pub mod params;
 pub mod pass1;
 pub mod pass2;
@@ -20,7 +20,7 @@ pub struct CompositeProcessor {
     encoded_width: usize,
     output_width: usize,
     output_height: usize,
-    hplan: lanczos::HorizontalPlan,
+    hplan: nearest::HorizontalPlan,
     modulation_table: Vec<[f32; 2]>,
     fir_plan: pass2::FirPlan,
 }
@@ -31,7 +31,7 @@ impl CompositeProcessor {
         let out_w = (enc_w / 2).max(1);
         let n_enc = enc_w * src_height;
         let n_out = out_w * src_height;
-        let hplan = lanczos::build_plan(src_width, enc_w);
+        let hplan = nearest::build_plan(src_width, enc_w);
         let modulation_table = pass1::build_modulation_table(enc_w);
         let fir_plan = pass2::build_plan(enc_w, out_w);
         Self {
@@ -69,7 +69,7 @@ impl CompositeProcessor {
         self.encoded.resize(n_enc, [0.0; 3]);
         self.decoded.resize(n_out, [0.0; 3]);
         self.rgba_out.resize(n_out * 4, 0u8);
-        self.hplan = lanczos::build_plan(src_w, desired_enc_w);
+        self.hplan = nearest::build_plan(src_w, desired_enc_w);
         self.modulation_table = pass1::build_modulation_table(desired_enc_w);
         self.fir_plan = pass2::build_plan(desired_enc_w, desired_out_w);
     }
@@ -97,7 +97,7 @@ impl CompositeProcessor {
             .zip(self.rgba_out.par_chunks_mut(out_w * 4))
             .enumerate()
             .for_each(|(y, ((((src_row, exp_row), enc_row), dec_row), rgba_row))| {
-                lanczos::expand_row(src_row, exp_row, hplan);
+                nearest::expand_row(src_row, exp_row, hplan);
                 pass1::pass1_row(exp_row, enc_row, y, ntsc_field, params, modulation_table);
                 pass2::pass2_row(enc_row, dec_row, out_w, gamma_exp, fir_plan);
                 for (src, dst) in dec_row.iter().zip(rgba_row.chunks_exact_mut(4)) {
