@@ -10,6 +10,8 @@ image = "0.25.10"
 include_dir = "0.7"
 wgpu = "27"
 pollster = "0.4"
+bytemuck = { version = "1.24", features = ["derive"] }
+glam = "0.30"
 librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
 engine-core = { path = "crates/engine-core" }
 shader_test = { package = "cpu-presenter", path = "crates/cpu-presenter" }

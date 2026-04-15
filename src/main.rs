@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use winit::event_loop::EventLoop;
 
 mod app;
+mod gpu_renderer;
 mod input;
 mod map;
 mod model;
 mod net;
-mod renderer;
 mod simulation;
 mod texture;
 

@@ -1,0 +1,830 @@
+use std::sync::Arc;
+
+use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Vec3};
+use image::{Rgba, RgbaImage};
+use wgpu::util::DeviceExt;
+
+use crate::model::{Map, Sprite};
+use crate::simulation::PlayerState;
+
+pub const SCENE_WIDTH: u32 = 640;
+pub const SCENE_HEIGHT: u32 = 360;
+
+const TEXTURE_SIZE: usize = 64;
+const ANIM_COLS: usize = 3;
+const ANIM_ROWS: usize = 4;
+const FRAME_W: usize = TEXTURE_SIZE;
+const FRAME_H: usize = TEXTURE_SIZE;
+const ANIM_FRAME_COUNT: u32 = 3;
+const ANIM_MS_PER_FRAME: f64 = 90.0;
+const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
+const WALL_HEIGHT: f32 = 1.0;
+const CAMERA_HEIGHT: f32 = 0.5;
+const SPRITE_WIDTH: f32 = 0.85;
+const SPRITE_HEIGHT: f32 = 0.85;
+const NEAR_PLANE: f32 = 0.05;
+const FAR_PLANE: f32 = 128.0;
+const SKY_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.08,
+    g: 0.09,
+    b: 0.12,
+    a: 1.0,
+};
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SceneVertex {
+    position: [f32; 3],
+    uv: [f32; 2],
+}
+
+impl SceneVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<SceneVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SceneUniforms {
+    view_proj: [[f32; 4]; 4],
+}
+
+#[derive(Clone, Copy)]
+struct AtlasRect {
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    pixel_width: u32,
+    pixel_height: u32,
+}
+
+#[derive(Clone, Copy)]
+enum VisibleSide {
+    Front,
+    Back,
+    Left,
+    Right,
+}
+
+pub struct SceneRenderer {
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    scene_view: wgpu::TextureView,
+    depth_view: wgpu::TextureView,
+    scene_bind_group: wgpu::BindGroup,
+    blit_bind_group: wgpu::BindGroup,
+    scene_pipeline: wgpu::RenderPipeline,
+    blit_pipeline: wgpu::RenderPipeline,
+    scene_uniform_buffer: wgpu::Buffer,
+    wall_vertex_buffer: wgpu::Buffer,
+    wall_index_buffer: wgpu::Buffer,
+    wall_index_count: u32,
+    sprite_vertex_buffer: wgpu::Buffer,
+    sprite_vertex_capacity: usize,
+    sprite_vertex_count: u32,
+    atlas_rects: Vec<AtlasRect>,
+}
+
+impl SceneRenderer {
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        map: &Map,
+        textures: &[RgbaImage],
+        surface_format: wgpu::TextureFormat,
+    ) -> Self {
+        let (atlas_image, atlas_rects) = build_texture_atlas(textures);
+        let atlas_size = atlas_image.dimensions();
+        let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_texture_atlas"),
+            size: wgpu::Extent3d {
+                width: atlas_size.0,
+                height: atlas_size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &atlas_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            atlas_image.as_raw(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * atlas_size.0),
+                rows_per_image: Some(atlas_size.1),
+            },
+            wgpu::Extent3d {
+                width: atlas_size.0,
+                height: atlas_size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cpu_game_atlas_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let scene_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_scene_texture"),
+            size: wgpu::Extent3d {
+                width: SCENE_WIDTH,
+                height: SCENE_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let scene_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cpu_game_scene_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_scene_depth"),
+            size: wgpu::Extent3d {
+                width: SCENE_WIDTH,
+                height: SCENE_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let scene_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_scene_uniforms"),
+            contents: bytemuck::bytes_of(&SceneUniforms {
+                view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cpu_game_scene_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_scene_bg"),
+            layout: &scene_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: scene_uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let blit_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cpu_game_blit_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_blit_bg"),
+            layout: &blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&scene_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&scene_sampler),
+                },
+            ],
+        });
+
+        let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cpu_game_scene_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_scene.wgsl").into()),
+        });
+        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cpu_game_blit_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_blit.wgsl").into()),
+        });
+
+        let scene_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cpu_game_scene_pl"),
+            bind_group_layouts: &[&scene_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_scene_pipeline"),
+            layout: Some(&scene_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &scene_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SceneVertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cpu_game_blit_pl"),
+            bind_group_layouts: &[&blit_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_blit_pipeline"),
+            layout: Some(&blit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &blit_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let (wall_vertices, wall_indices) = build_wall_mesh(map, &atlas_rects);
+        let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_wall_vertices"),
+            contents: bytemuck::cast_slice(&wall_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let wall_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_wall_indices"),
+            contents: bytemuck::cast_slice(&wall_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        let sprite_vertex_capacity = 6;
+        let sprite_vertex_buffer = create_sprite_buffer(&device, sprite_vertex_capacity);
+
+        Self {
+            device,
+            queue,
+            scene_view,
+            depth_view,
+            scene_bind_group,
+            blit_bind_group,
+            scene_pipeline,
+            blit_pipeline,
+            scene_uniform_buffer,
+            wall_vertex_buffer,
+            wall_index_buffer,
+            wall_index_count: wall_indices.len() as u32,
+            sprite_vertex_buffer,
+            sprite_vertex_capacity,
+            sprite_vertex_count: 0,
+            atlas_rects,
+        }
+    }
+
+    pub fn render_frame(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        output_view: &wgpu::TextureView,
+        viewport: (u32, u32, u32, u32),
+        player: &PlayerState,
+        sprites: &[Sprite],
+        anim_elapsed_ms: f64,
+    ) {
+        let view_proj = build_view_projection(player);
+        self.queue.write_buffer(
+            &self.scene_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&SceneUniforms {
+                view_proj: view_proj.to_cols_array_2d(),
+            }),
+        );
+
+        let sprite_vertices = build_sprite_vertices(player, sprites, &self.atlas_rects, anim_elapsed_ms);
+        self.ensure_sprite_capacity(sprite_vertices.len());
+        if !sprite_vertices.is_empty() {
+            self.queue.write_buffer(
+                &self.sprite_vertex_buffer,
+                0,
+                bytemuck::cast_slice(&sprite_vertices),
+            );
+        }
+        self.sprite_vertex_count = sprite_vertices.len() as u32;
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_scene_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(SKY_COLOR),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.scene_pipeline);
+            pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.wall_vertex_buffer.slice(..));
+            pass.set_index_buffer(self.wall_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.wall_index_count, 0, 0..1);
+
+            if self.sprite_vertex_count > 0 {
+                pass.set_vertex_buffer(0, self.sprite_vertex_buffer.slice(..));
+                pass.draw(0..self.sprite_vertex_count, 0..1);
+            }
+        }
+
+        let (vx, vy, vw, vh) = viewport;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("cpu_game_blit_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_viewport(vx as f32, vy as f32, vw as f32, vh as f32, 0.0, 1.0);
+        pass.set_pipeline(&self.blit_pipeline);
+        pass.set_bind_group(0, &self.blit_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
+    pub fn calculate_aspect_preserving_viewport(
+        window_width: u32,
+        window_height: u32,
+        content_width: u32,
+        content_height: u32,
+    ) -> (u32, u32, u32, u32) {
+        let window_aspect = window_width as f32 / window_height as f32;
+        let content_aspect = content_width as f32 / content_height as f32;
+
+        if window_aspect > content_aspect {
+            let scaled_width = window_height as f32 * content_aspect;
+            let x_offset = (window_width as f32 - scaled_width) / 2.0;
+            (x_offset as u32, 0, scaled_width as u32, window_height)
+        } else {
+            let scaled_height = window_width as f32 / content_aspect;
+            let y_offset = (window_height as f32 - scaled_height) / 2.0;
+            (0, y_offset as u32, window_width, scaled_height as u32)
+        }
+    }
+
+    fn ensure_sprite_capacity(&mut self, required_vertices: usize) {
+        if required_vertices <= self.sprite_vertex_capacity {
+            return;
+        }
+
+        self.sprite_vertex_capacity = required_vertices.next_power_of_two().max(6);
+        self.sprite_vertex_buffer = create_sprite_buffer(&self.device, self.sprite_vertex_capacity);
+    }
+}
+
+fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("cpu_game_sprite_vertices"),
+        size: (vertex_capacity * std::mem::size_of::<SceneVertex>()) as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn build_view_projection(player: &PlayerState) -> Mat4 {
+    let plane_len = ((player.plane_x * player.plane_x) + (player.plane_y * player.plane_y)).sqrt();
+    let fov = 2.0 * plane_len.atan() as f32;
+    let eye = Vec3::new(player.x as f32, CAMERA_HEIGHT, player.y as f32);
+    let forward = Vec3::new(player.dir_x as f32, 0.0, player.dir_y as f32);
+    let view = Mat4::look_to_lh(eye, forward, Vec3::Y);
+    let projection = Mat4::perspective_lh(
+        fov,
+        SCENE_WIDTH as f32 / SCENE_HEIGHT as f32,
+        NEAR_PLANE,
+        FAR_PLANE,
+    );
+    projection * view
+}
+
+fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
+    let padding = 1u32;
+    let width = textures
+        .iter()
+        .map(|texture| texture.width() + padding)
+        .sum::<u32>()
+        + padding;
+    let height = textures.iter().map(image::GenericImageView::height).max().unwrap_or(1) + padding * 2;
+
+    let mut atlas = RgbaImage::from_pixel(width.max(1), height.max(1), Rgba([0, 0, 0, 0]));
+    let mut rects = Vec::with_capacity(textures.len());
+    let mut cursor_x = padding;
+
+    for texture in textures {
+        for y in 0..texture.height() {
+            for x in 0..texture.width() {
+                let pixel = texture.get_pixel(x, y);
+                atlas.put_pixel(cursor_x + x, padding + y, *pixel);
+            }
+        }
+
+        rects.push(AtlasRect {
+            u0: cursor_x as f32 / width as f32,
+            v0: padding as f32 / height as f32,
+            u1: (cursor_x + texture.width()) as f32 / width as f32,
+            v1: (padding + texture.height()) as f32 / height as f32,
+            pixel_width: texture.width(),
+            pixel_height: texture.height(),
+        });
+        cursor_x += texture.width() + padding;
+    }
+
+    (atlas, rects)
+}
+
+fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, Vec<u32>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let height = map.tiles.len();
+    let width = map.tiles.first().map_or(0, Vec::len);
+
+    for z in 0..height {
+        for x in 0..width {
+            if !map.is_wall(x, z) {
+                continue;
+            }
+
+            let texture_index = map
+                .tile_at(x, z)
+                .saturating_sub(1) as usize;
+            let rect = atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))];
+            let x0 = x as f32;
+            let x1 = x0 + 1.0;
+            let z0 = z as f32;
+            let z1 = z0 + 1.0;
+
+            let left_empty = x == 0 || !map.is_wall(x - 1, z);
+            let right_empty = x + 1 >= width || !map.is_wall(x + 1, z);
+            let north_empty = z == 0 || !map.is_wall(x, z - 1);
+            let south_empty = z + 1 >= height || !map.is_wall(x, z + 1);
+
+            if left_empty {
+                push_quad(
+                    &mut vertices,
+                    &mut indices,
+                    rect,
+                    [x0, 0.0, z1],
+                    [x0, 0.0, z0],
+                    [x0, WALL_HEIGHT, z0],
+                    [x0, WALL_HEIGHT, z1],
+                );
+            }
+            if right_empty {
+                push_quad(
+                    &mut vertices,
+                    &mut indices,
+                    rect,
+                    [x1, 0.0, z0],
+                    [x1, 0.0, z1],
+                    [x1, WALL_HEIGHT, z1],
+                    [x1, WALL_HEIGHT, z0],
+                );
+            }
+            if north_empty {
+                push_quad(
+                    &mut vertices,
+                    &mut indices,
+                    rect,
+                    [x1, 0.0, z0],
+                    [x0, 0.0, z0],
+                    [x0, WALL_HEIGHT, z0],
+                    [x1, WALL_HEIGHT, z0],
+                );
+            }
+            if south_empty {
+                push_quad(
+                    &mut vertices,
+                    &mut indices,
+                    rect,
+                    [x0, 0.0, z1],
+                    [x1, 0.0, z1],
+                    [x1, WALL_HEIGHT, z1],
+                    [x0, WALL_HEIGHT, z1],
+                );
+            }
+        }
+    }
+
+    (vertices, indices)
+}
+
+fn build_sprite_vertices(
+    player: &PlayerState,
+    sprites: &[Sprite],
+    atlas_rects: &[AtlasRect],
+    anim_elapsed_ms: f64,
+) -> Vec<SceneVertex> {
+    let mut sorted = sprites.to_vec();
+    sorted.sort_by(|left, right| {
+        let left_dist = (left.x - player.x).powi(2) + (left.y - player.y).powi(2);
+        let right_dist = (right.x - player.x).powi(2) + (right.y - player.y).powi(2);
+        right_dist.total_cmp(&left_dist)
+    });
+
+    let right = Vec3::new(player.plane_x as f32, 0.0, player.plane_y as f32).normalize_or_zero();
+    let half_width = right * (SPRITE_WIDTH * 0.5);
+    let up = Vec3::new(0.0, SPRITE_HEIGHT, 0.0);
+    let mut vertices = Vec::with_capacity(sorted.len() * 6);
+    let camera_facing_angle = player.dir_y.atan2(player.dir_x);
+
+    for sprite in sorted {
+        let Some(rect) = atlas_rects.get(sprite.texture_index) else {
+            continue;
+        };
+        let uv_rect = select_sprite_uv_rect(*rect, &sprite, camera_facing_angle, anim_elapsed_ms);
+        let center = Vec3::new(sprite.x as f32, 0.0, sprite.y as f32);
+        let bottom_left = center - half_width;
+        let bottom_right = center + half_width;
+        let top_left = bottom_left + up;
+        let top_right = bottom_right + up;
+
+        vertices.extend_from_slice(&[
+            SceneVertex {
+                position: bottom_left.to_array(),
+                uv: [uv_rect.u0, uv_rect.v1],
+            },
+            SceneVertex {
+                position: bottom_right.to_array(),
+                uv: [uv_rect.u1, uv_rect.v1],
+            },
+            SceneVertex {
+                position: top_right.to_array(),
+                uv: [uv_rect.u1, uv_rect.v0],
+            },
+            SceneVertex {
+                position: bottom_left.to_array(),
+                uv: [uv_rect.u0, uv_rect.v1],
+            },
+            SceneVertex {
+                position: top_right.to_array(),
+                uv: [uv_rect.u1, uv_rect.v0],
+            },
+            SceneVertex {
+                position: top_left.to_array(),
+                uv: [uv_rect.u0, uv_rect.v0],
+            },
+        ]);
+    }
+
+    vertices
+}
+
+fn select_sprite_uv_rect(
+    rect: AtlasRect,
+    sprite: &Sprite,
+    camera_facing_angle: f64,
+    anim_elapsed_ms: f64,
+) -> AtlasRect {
+    let atlas_width = ANIM_COLS * FRAME_W;
+    let atlas_height = ANIM_ROWS * FRAME_H;
+    if (rect.pixel_width as usize) < atlas_width || (rect.pixel_height as usize) < atlas_height {
+        return rect;
+    }
+
+    let frame_step = (anim_elapsed_ms / ANIM_MS_PER_FRAME).floor() as u32;
+    let frame_col = walk_frame_col(frame_step, sprite.is_moving) as usize;
+    let side_row = side_to_row(get_visible_side(
+        sprite.movement_angle,
+        camera_facing_angle,
+    )) as usize;
+
+    let frame_origin_x = frame_col * FRAME_W;
+    let frame_origin_y = side_row * FRAME_H;
+    let width_scale = (rect.u1 - rect.u0) / rect.pixel_width as f32;
+    let height_scale = (rect.v1 - rect.v0) / rect.pixel_height as f32;
+
+    AtlasRect {
+        u0: rect.u0 + frame_origin_x as f32 * width_scale,
+        v0: rect.v0 + frame_origin_y as f32 * height_scale,
+        u1: rect.u0 + (frame_origin_x + FRAME_W) as f32 * width_scale,
+        v1: rect.v0 + (frame_origin_y + FRAME_H) as f32 * height_scale,
+        pixel_width: FRAME_W as u32,
+        pixel_height: FRAME_H as u32,
+    }
+}
+
+fn get_visible_side(entity_movement_angle: f64, camera_facing_angle: f64) -> VisibleSide {
+    const SIDE_HALF_ANGLE: f64 = 0.785398;
+
+    let mut rel = entity_movement_angle - camera_facing_angle;
+    rel = (rel + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+
+    let abs_rel = rel.abs();
+
+    if abs_rel < SIDE_HALF_ANGLE {
+        VisibleSide::Back
+    } else if abs_rel > std::f64::consts::PI - SIDE_HALF_ANGLE {
+        VisibleSide::Front
+    } else if abs_rel > std::f64::consts::FRAC_PI_2 - SIDE_HALF_ANGLE
+        && abs_rel < std::f64::consts::FRAC_PI_2 + SIDE_HALF_ANGLE
+    {
+        if rel > 0.0 {
+            VisibleSide::Left
+        } else {
+            VisibleSide::Right
+        }
+    } else if abs_rel < std::f64::consts::FRAC_PI_2 {
+        VisibleSide::Back
+    } else {
+        VisibleSide::Front
+    }
+}
+
+fn side_to_row(side: VisibleSide) -> u32 {
+    match side {
+        VisibleSide::Front => 0,
+        VisibleSide::Back => 1,
+        VisibleSide::Left => 2,
+        VisibleSide::Right => 3,
+    }
+}
+
+fn walk_frame_col(frame_step: u32, is_moving: bool) -> u32 {
+    if !is_moving {
+        ANIM_FRAME_COUNT / 2
+    } else {
+        WALK_PING_PONG[(frame_step % WALK_PING_PONG.len() as u32) as usize]
+    }
+}
+
+fn push_quad(
+    vertices: &mut Vec<SceneVertex>,
+    indices: &mut Vec<u32>,
+    rect: AtlasRect,
+    p0: [f32; 3],
+    p1: [f32; 3],
+    p2: [f32; 3],
+    p3: [f32; 3],
+) {
+    let base = vertices.len() as u32;
+    vertices.extend_from_slice(&[
+        SceneVertex {
+            position: p0,
+            uv: [rect.u0, rect.v1],
+        },
+        SceneVertex {
+            position: p1,
+            uv: [rect.u1, rect.v1],
+        },
+        SceneVertex {
+            position: p2,
+            uv: [rect.u1, rect.v0],
+        },
+        SceneVertex {
+            position: p3,
+            uv: [rect.u0, rect.v0],
+        },
+    ]);
+    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}

@@ -2,19 +2,16 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use engine_core::PresentationRequest;
-use shader_test::{ShaderRenderer, Size};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
+use crate::gpu_renderer::{SceneRenderer, SCENE_HEIGHT, SCENE_WIDTH};
 use crate::input::InputMessage;
-use crate::map::build_ao;
-use crate::model::{AoField, AoParameters, PlayerId};
+use crate::model::PlayerId;
 use crate::net::server::Server;
-use crate::renderer::{self, HEIGHT, WIDTH};
 
 const TARGET_FPS: u64 = 60;
 
@@ -29,25 +26,19 @@ struct WindowState {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
-    presenter: ShaderRenderer,
-    render_width: usize,
-    render_height: usize,
-    frame_rgb: Vec<u32>,
-    frame_rgba: Vec<u8>,
+    renderer: SceneRenderer,
 }
 
 pub struct App {
     state: Option<WindowState>,
     server: Server,
-    ao: AoField,
     input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
     human_id: PlayerId,
     keys: HashSet<KeyCode>,
     last_frame: Instant,
     frame_duration: Duration,
     mouse_sensitivity: f64,
-    textures: Vec<image::RgbaImage>,
-    pitch: i32,
+    textures: Option<Vec<image::RgbaImage>>,
     current_tick: u64,
     anim_elapsed_ms: f64,
     mouse_capture_mode: MouseCaptureMode,
@@ -56,27 +47,16 @@ pub struct App {
 
 impl App {
     pub fn new(server: Server, input_queue: Arc<Mutex<VecDeque<InputMessage>>>, human_id: PlayerId, textures: Vec<image::RgbaImage>) -> Self {
-        let ao = build_ao(
-            &server.map,
-            &AoParameters {
-                corner_strength: 0.8,
-                wall_seam_strength: 0.85,
-                minimum_light: 0.35,
-            },
-        );
-
         Self {
             state: None,
             server,
-            ao,
             input_queue,
             human_id,
             keys: HashSet::new(),
             last_frame: Instant::now(),
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
-            textures,
-            pitch: 34,
+            textures: Some(textures),
             current_tick: 0,
             anim_elapsed_ms: 0.0,
             mouse_capture_mode: MouseCaptureMode::None,
@@ -171,45 +151,12 @@ impl App {
         };
         let sprites = self.server.state.sprites.clone();
 
-        renderer::render(
-            &mut state.frame_rgb,
-            state.render_width,
-            state.render_height,
-            &player,
-            &sprites,
-            &self.server.map,
-            &self.ao,
-            &self.textures,
-            self.pitch,
-            self.anim_elapsed_ms,
-        );
-
-        for (src, dst) in state
-            .frame_rgb
-            .iter()
-            .zip(state.frame_rgba.chunks_exact_mut(4))
-        {
-            dst[0] = ((src >> 16) & 0xFF) as u8;
-            dst[1] = ((src >> 8) & 0xFF) as u8;
-            dst[2] = (src & 0xFF) as u8;
-            dst[3] = 255;
-        }
-
-        let mut request = PresentationRequest::new(
-            std::mem::take(&mut state.frame_rgba),
-            state.render_width as u32,
-            state.render_height as u32,
-            self.current_tick,
-        );
-        state.presenter.load_presentation(&request);
-        state.frame_rgba = std::mem::take(&mut request.pixel_data);
-
         let output = match state.surface.get_current_texture() {
             Ok(output) => output,
             Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
                 state
                     .surface
-                    .configure(&state.presenter.device, &state.surface_config);
+                    .configure(&state.renderer.device, &state.surface_config);
                 return;
             }
             Err(_) => {
@@ -222,53 +169,31 @@ impl App {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder =
             state
-                .presenter
+                .renderer
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("cpu_game_presenter_encoder"),
+                    label: Some("cpu_game_scene_encoder"),
                 });
 
-        let (vx, vy, vw, vh) = ShaderRenderer::calculate_aspect_preserving_viewport(
+        let (vx, vy, vw, vh) = SceneRenderer::calculate_aspect_preserving_viewport(
             state.surface_config.width,
             state.surface_config.height,
-            state.render_width as u32,
-            state.render_height as u32,
+            SCENE_WIDTH,
+            SCENE_HEIGHT,
         );
 
-        {
-            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("cpu_game_clear_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-        }
-
-        if state
-            .presenter
-            .render_frame_to_viewport(
+        state
+            .renderer
+            .render_frame(
                 &mut encoder,
                 &view,
-                Size::new(vw, vh),
-                state.surface_config.format,
-                vx,
-                vy,
-            )
-            .is_err()
-        {
-            return;
-        }
+                (vx, vy, vw, vh),
+                &player,
+                &sprites,
+                self.anim_elapsed_ms,
+            );
 
-        state.presenter.queue.submit(std::iter::once(encoder.finish()));
+        state.renderer.queue.submit(std::iter::once(encoder.finish()));
         output.present();
     }
 
@@ -279,7 +204,7 @@ impl App {
                 state.surface_config.height = new_size.height;
                 state
                     .surface
-                    .configure(&state.presenter.device, &state.surface_config);
+                    .configure(&state.renderer.device, &state.surface_config);
             }
         }
     }
@@ -289,7 +214,7 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
             .with_title("cpu-game")
-            .with_inner_size(winit::dpi::PhysicalSize::new(WIDTH as u32, HEIGHT as u32))
+            .with_inner_size(winit::dpi::PhysicalSize::new(SCENE_WIDTH, SCENE_HEIGHT))
             .with_resizable(false);
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
@@ -325,14 +250,23 @@ impl ApplicationHandler for App {
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
 
-        let mut presenter = ShaderRenderer::new(device.clone(), queue.clone());
-        presenter.load_default_preset().unwrap();
+        let textures = self
+            .textures
+            .take()
+            .expect("textures should only be consumed once");
+        let renderer = SceneRenderer::new(
+            device.clone(),
+            queue.clone(),
+            &self.server.map,
+            &textures,
+            surface_format,
+        );
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: WIDTH as u32,
-            height: HEIGHT as u32,
+            width: SCENE_WIDTH,
+            height: SCENE_HEIGHT,
             present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: caps.alpha_modes[0],
             view_formats: vec![],
@@ -342,17 +276,11 @@ impl ApplicationHandler for App {
 
         self.mouse_capture_mode = Self::set_mouse_capture(window.as_ref(), false);
         self.ignore_next_motion = false;
-        let render_width = WIDTH;
-        let render_height = HEIGHT;
         self.state = Some(WindowState {
             window,
             surface,
             surface_config,
-            presenter,
-            render_width,
-            render_height,
-            frame_rgb: vec![0u32; render_width * render_height],
-            frame_rgba: vec![0u8; render_width * render_height * 4],
+            renderer,
         });
     }
 
