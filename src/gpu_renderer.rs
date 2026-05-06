@@ -926,6 +926,7 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
                     &mut vertices,
                     &mut indices,
                     rect,
+                    false,
                     [x0, 0.0, z1],
                     [x0, 0.0, z0],
                     [x0, WALL_HEIGHT, z0],
@@ -937,6 +938,7 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
                     &mut vertices,
                     &mut indices,
                     rect,
+                    false,
                     [x1, 0.0, z0],
                     [x1, 0.0, z1],
                     [x1, WALL_HEIGHT, z1],
@@ -948,6 +950,7 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
                     &mut vertices,
                     &mut indices,
                     rect,
+                    true,
                     [x1, 0.0, z0],
                     [x0, 0.0, z0],
                     [x0, WALL_HEIGHT, z0],
@@ -959,6 +962,7 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
                     &mut vertices,
                     &mut indices,
                     rect,
+                    true,
                     [x0, 0.0, z1],
                     [x1, 0.0, z1],
                     [x1, WALL_HEIGHT, z1],
@@ -1114,28 +1118,34 @@ fn push_quad(
     vertices: &mut Vec<SceneVertex>,
     indices: &mut Vec<u32>,
     rect: AtlasRect,
+    flip_u: bool,
     p0: [f32; 3],
     p1: [f32; 3],
     p2: [f32; 3],
     p3: [f32; 3],
 ) {
+    let (left_u, right_u) = if flip_u {
+        (rect.u1, rect.u0)
+    } else {
+        (rect.u0, rect.u1)
+    };
     let base = vertices.len() as u32;
     vertices.extend_from_slice(&[
         SceneVertex {
             position: p0,
-            uv: [rect.u0, rect.v1],
+            uv: [left_u, rect.v1],
         },
         SceneVertex {
             position: p1,
-            uv: [rect.u1, rect.v1],
+            uv: [right_u, rect.v1],
         },
         SceneVertex {
             position: p2,
-            uv: [rect.u1, rect.v0],
+            uv: [right_u, rect.v0],
         },
         SceneVertex {
             position: p3,
-            uv: [rect.u0, rect.v0],
+            uv: [left_u, rect.v0],
         },
     ]);
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
