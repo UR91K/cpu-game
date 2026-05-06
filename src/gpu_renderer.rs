@@ -1059,12 +1059,14 @@ fn select_sprite_uv_rect(
     let frame_origin_y = side_row * FRAME_H;
     let width_scale = (rect.u1 - rect.u0) / rect.pixel_width as f32;
     let height_scale = (rect.v1 - rect.v0) / rect.pixel_height as f32;
+    let half_texel_u = width_scale * 0.5;
+    let half_texel_v = height_scale * 0.5;
 
     AtlasRect {
-        u0: rect.u0 + frame_origin_x as f32 * width_scale,
-        v0: rect.v0 + frame_origin_y as f32 * height_scale,
-        u1: rect.u0 + (frame_origin_x + FRAME_W) as f32 * width_scale,
-        v1: rect.v0 + (frame_origin_y + FRAME_H) as f32 * height_scale,
+        u0: rect.u0 + frame_origin_x as f32 * width_scale + half_texel_u,
+        v0: rect.v0 + frame_origin_y as f32 * height_scale + half_texel_v,
+        u1: rect.u0 + (frame_origin_x + FRAME_W) as f32 * width_scale - half_texel_u,
+        v1: rect.v0 + (frame_origin_y + FRAME_H) as f32 * height_scale - half_texel_v,
         pixel_width: FRAME_W as u32,
         pixel_height: FRAME_H as u32,
     }
