@@ -31,7 +31,16 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Identify the authoritative owner for each behavior changed by the feature
+  (server sim, shared logic crate, client prediction, renderer, toolchain).
+- Explain how gameplay-affecting logic remains deterministic or how divergence
+  is detected and corrected.
+- Name the narrow automated tests required for simulation, protocol, and
+  presentation boundaries before implementation is considered complete.
+- State the expected frame-time, tick-rate, allocation, or throughput impact and
+  how it will be measured if the change is performance-sensitive.
+- Record any boundary violation, unsafe usage, or global mutable state addition
+  in Complexity Tracking with justification.
 
 ## Project Structure
 
@@ -92,7 +101,8 @@ ios/ or android/
 ```
 
 **Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+directories captured above, including where authoritative simulation, networking,
+presentation, and tests will live]
 
 ## Complexity Tracking
 
