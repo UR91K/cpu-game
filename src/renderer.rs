@@ -2,22 +2,17 @@ use palette::Srgb;
 
 use crate::model::{AoField, Map};
 use crate::render_assembly::{RenderBillboard, RenderCamera};
-use crate::texture::{AnimationStyle, FacingMode, TextureManager};
+use crate::texture::{
+    animation_descriptor, AnimationDescriptor, AnimationPlayback, FacingMode, TextureManager,
+};
 
 pub const WIDTH: usize = 640;
 pub const HEIGHT: usize = 480;
-pub const TEXTURE_SIZE: usize = 64;
 const BASE_ASPECT: f64 = WIDTH as f64 / HEIGHT as f64;
 
 const FLOOR_COLOR: Srgb = Srgb::new(66.0, 119.0, 41.0);
 const CEILING_COLOR: Srgb = Srgb::new(20.0, 20.0, 20.0);
 
-const ANIM_COLS: usize = 3;
-const ANIM_ROWS: usize = 4;
-const FRAME_W: usize = TEXTURE_SIZE;
-const FRAME_H: usize = TEXTURE_SIZE;
-const ANIM_FRAME_COUNT: u32 = 3;
-const ANIM_MS_PER_FRAME: f64 = 90.0;
 const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,9 +58,31 @@ fn side_to_row(side: VisibleSide) -> u32 {
 
 fn walk_frame_col(frame_step: u32, is_moving: bool) -> u32 {
     if !is_moving {
-        ANIM_FRAME_COUNT / 2
+        1
     } else {
         WALK_PING_PONG[(frame_step % WALK_PING_PONG.len() as u32) as usize]
+    }
+}
+
+fn animation_frame_column(
+    animation: AnimationDescriptor,
+    frame_step: u32,
+    is_moving: bool,
+) -> usize {
+    match animation.playback {
+        AnimationPlayback::PingPong => walk_frame_col(frame_step, is_moving) as usize,
+        AnimationPlayback::Loop => (frame_step as usize) % animation.columns.max(1),
+    }
+}
+
+fn animation_frame_row(animation: AnimationDescriptor, frame_step: u32) -> usize {
+    if animation.directional_rows {
+        0
+    } else {
+        match animation.playback {
+            AnimationPlayback::PingPong => 0,
+            AnimationPlayback::Loop => (frame_step as usize) % animation.rows.max(1),
+        }
     }
 }
 
@@ -280,8 +297,6 @@ pub fn render(
 
     // draw billboards
     let camera_facing_angle = camera.dir_y.atan2(camera.dir_x);
-    let atlas_width = ANIM_COLS * FRAME_W;
-    let atlas_height = ANIM_ROWS * FRAME_H;
 
     for billboard in billboards {
         let sprite_x = billboard.x - camera.x;
@@ -318,37 +333,56 @@ pub fn render(
         }
 
         let texture = textures.image(billboard.texture);
-        let use_atlas = texture.width() as usize >= atlas_width
-            && texture.height() as usize >= atlas_height;
-        let animated = use_atlas && matches!(billboard.animation, AnimationStyle::WalkPingPong);
-        let frame_step = (anim_elapsed_ms / ANIM_MS_PER_FRAME).floor() as u32;
-        let frame_col = if animated {
-            walk_frame_col(frame_step, billboard.is_moving) as usize
+        let animation = animation_descriptor(billboard.animation);
+        let animated = animation
+            .map(|anim| {
+                texture.width() as usize >= anim.columns * anim.frame_width
+                    && texture.height() as usize >= anim.rows * anim.frame_height
+            })
+            .unwrap_or(false);
+        let frame_step = animation
+            .map(|anim| (anim_elapsed_ms / anim.ms_per_frame).floor() as u32)
+            .unwrap_or(0);
+        let frame_col = if let Some(animation) = animation.filter(|_| animated) {
+            animation_frame_column(animation, frame_step, billboard.is_moving)
         } else {
             0
         };
-        let side_row = if animated && matches!(billboard.facing_mode, FacingMode::Movement) {
-            side_to_row(get_visible_side(
-                billboard.movement_angle,
-                camera_facing_angle,
-            )) as usize
+        let side_row = if let Some(animation) = animation.filter(|_| animated) {
+            if animation.directional_rows && matches!(billboard.facing_mode, FacingMode::Movement) {
+                side_to_row(get_visible_side(
+                    billboard.movement_angle,
+                    camera_facing_angle,
+                )) as usize
+            } else {
+                animation_frame_row(animation, frame_step)
+            }
         } else {
             0
         };
-        let frame_origin_x = if animated { frame_col * FRAME_W } else { 0 };
-        let frame_origin_y = if animated { side_row * FRAME_H } else { 0 };
+        let frame_width = animation
+            .filter(|_| animated)
+            .map(|anim| anim.frame_width)
+            .unwrap_or(texture.width() as usize);
+        let frame_height = animation
+            .filter(|_| animated)
+            .map(|anim| anim.frame_height)
+            .unwrap_or(texture.height() as usize);
+        let frame_origin_x = if animated { frame_col * frame_width } else { 0 };
+        let frame_origin_y = if animated { side_row * frame_height } else { 0 };
 
         for sx in draw_start_x..draw_end_x {
             let tex_x = ((sx as i32 - (-sprite_width / 2 + sprite_screen_x))
-                * FRAME_W as i32
+                * frame_width as i32
                 / sprite_width)
-                .rem_euclid(FRAME_W as i32) as usize;
+                .rem_euclid(frame_width as i32) as usize;
             if transform_y >= z_buffer[sx] {
                 continue;
             }
             for sy in draw_start_y..draw_end_y {
                 let d = sy as i32 - render_height as i32 / 2 - pitch_px + sprite_height / 2;
-                let tex_y = (d * FRAME_H as i32 / sprite_height).rem_euclid(FRAME_H as i32)
+                let tex_y = (d * frame_height as i32 / sprite_height)
+                    .rem_euclid(frame_height as i32)
                     as usize;
                 let color = texture.get_pixel(
                     (frame_origin_x + tex_x) as u32,

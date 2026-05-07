@@ -22,10 +22,16 @@ pub enum ActorTexture {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProjectileTexture {
+    Spiral,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureKey {
     Wall(WallTexture),
     Item(ItemTexture),
     Actor(ActorTexture),
+    Projectile(ProjectileTexture),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -46,6 +52,24 @@ pub enum FacingMode {
 pub enum AnimationStyle {
     Static,
     WalkPingPong,
+    LoopStrip,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimationPlayback {
+    PingPong,
+    Loop,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AnimationDescriptor {
+    pub frame_width: usize,
+    pub frame_height: usize,
+    pub columns: usize,
+    pub rows: usize,
+    pub ms_per_frame: f64,
+    pub playback: AnimationPlayback,
+    pub directional_rows: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -151,6 +175,7 @@ impl TextureManager {
             TextureKey::Wall(WallTexture::Grey),
             TextureKey::Item(ItemTexture::Health),
             TextureKey::Actor(ActorTexture::Red),
+            TextureKey::Projectile(ProjectileTexture::Spiral),
         ] {
             let _ = self.texture_index(key);
         }
@@ -181,12 +206,36 @@ pub fn visual_definition(visual: VisualId) -> VisualDefinition {
             animation: AnimationStyle::Static,
         },
         VisualId::Projectile => VisualDefinition {
-            texture: TextureKey::Actor(ActorTexture::Red),
+            texture: TextureKey::Projectile(ProjectileTexture::Spiral),
             billboard_width: 0.35,
             billboard_height: 0.35,
             facing_mode: FacingMode::Fixed,
-            animation: AnimationStyle::Static,
+            animation: AnimationStyle::LoopStrip,
         },
+    }
+}
+
+pub fn animation_descriptor(style: AnimationStyle) -> Option<AnimationDescriptor> {
+    match style {
+        AnimationStyle::Static => None,
+        AnimationStyle::WalkPingPong => Some(AnimationDescriptor {
+            frame_width: 64,
+            frame_height: 64,
+            columns: 3,
+            rows: 4,
+            ms_per_frame: 90.0,
+            playback: AnimationPlayback::PingPong,
+            directional_rows: true,
+        }),
+        AnimationStyle::LoopStrip => Some(AnimationDescriptor {
+            frame_width: 16,
+            frame_height: 16,
+            columns: 4,
+            rows: 1,
+            ms_per_frame: 90.0,
+            playback: AnimationPlayback::Loop,
+            directional_rows: false,
+        }),
     }
 }
 
@@ -197,6 +246,7 @@ fn parse_texture_key(stem: &str) -> Option<TextureKey> {
         "wall.grey" => Some(TextureKey::Wall(WallTexture::Grey)),
         "item.health" => Some(TextureKey::Item(ItemTexture::Health)),
         "actor.red" => Some(TextureKey::Actor(ActorTexture::Red)),
+        "projectile.spiral" => Some(TextureKey::Projectile(ProjectileTexture::Spiral)),
         _ => None,
     }
 }
@@ -208,6 +258,7 @@ fn texture_sort_key(key: TextureKey) -> (u8, u8) {
         TextureKey::Wall(WallTexture::Grey) => (0, 2),
         TextureKey::Item(ItemTexture::Health) => (1, 0),
         TextureKey::Actor(ActorTexture::Red) => (2, 0),
+        TextureKey::Projectile(ProjectileTexture::Spiral) => (3, 0),
     }
 }
 

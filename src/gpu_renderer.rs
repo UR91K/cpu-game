@@ -8,7 +8,9 @@ use wgpu::util::DeviceExt;
 
 use crate::model::Map;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
-use crate::texture::{AnimationStyle, FacingMode, TextureKey, TextureManager};
+use crate::texture::{
+    animation_descriptor, AnimationDescriptor, AnimationPlayback, TextureKey, TextureManager,
+};
 
 pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 360;
@@ -18,13 +20,6 @@ const DECODED_WIDTH: u32 = SCENE_WIDTH * 2;
 const DECODED_HEIGHT: u32 = SCENE_HEIGHT;
 const CHROMA_MOD_FREQ: f32 = 4.0 * std::f32::consts::PI / 15.0;
 
-const TEXTURE_SIZE: usize = 64;
-const ANIM_COLS: usize = 3;
-const ANIM_ROWS: usize = 4;
-const FRAME_W: usize = TEXTURE_SIZE;
-const FRAME_H: usize = TEXTURE_SIZE;
-const ANIM_FRAME_COUNT: u32 = 3;
-const ANIM_MS_PER_FRAME: f64 = 90.0;
 const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 const WALL_HEIGHT: f32 = 1.0;
 const CAMERA_HEIGHT: f32 = 0.5;
@@ -1064,29 +1059,28 @@ fn select_sprite_uv_rect(
     camera_facing_angle: f64,
     anim_elapsed_ms: f64,
 ) -> AtlasRect {
-    let atlas_width = ANIM_COLS * FRAME_W;
-    let atlas_height = ANIM_ROWS * FRAME_H;
+    let Some(animation) = animation_descriptor(billboard.animation) else {
+        return rect;
+    };
+    let atlas_width = animation.columns * animation.frame_width;
+    let atlas_height = animation.rows * animation.frame_height;
     if (rect.pixel_width as usize) < atlas_width || (rect.pixel_height as usize) < atlas_height {
         return rect;
     }
 
-    if !matches!(billboard.animation, AnimationStyle::WalkPingPong) {
-        return rect;
-    }
-
-    let frame_step = (anim_elapsed_ms / ANIM_MS_PER_FRAME).floor() as u32;
-    let frame_col = walk_frame_col(frame_step, billboard.is_moving) as usize;
-    let side_row = if matches!(billboard.facing_mode, FacingMode::Movement) {
+    let frame_step = (anim_elapsed_ms / animation.ms_per_frame).floor() as u32;
+    let frame_col = animation_frame_column(animation, frame_step, billboard.is_moving);
+    let side_row = if animation.directional_rows && matches!(billboard.facing_mode, crate::texture::FacingMode::Movement) {
         side_to_row(get_visible_side(
             billboard.movement_angle,
             camera_facing_angle,
         )) as usize
     } else {
-        0
+        animation_frame_row(animation, frame_step)
     };
 
-    let frame_origin_x = frame_col * FRAME_W;
-    let frame_origin_y = side_row * FRAME_H;
+    let frame_origin_x = frame_col * animation.frame_width;
+    let frame_origin_y = side_row * animation.frame_height;
     let width_scale = (rect.u1 - rect.u0) / rect.pixel_width as f32;
     let height_scale = (rect.v1 - rect.v0) / rect.pixel_height as f32;
     let half_texel_u = width_scale * 0.5;
@@ -1095,10 +1089,32 @@ fn select_sprite_uv_rect(
     AtlasRect {
         u0: rect.u0 + frame_origin_x as f32 * width_scale + half_texel_u,
         v0: rect.v0 + frame_origin_y as f32 * height_scale + half_texel_v,
-        u1: rect.u0 + (frame_origin_x + FRAME_W) as f32 * width_scale - half_texel_u,
-        v1: rect.v0 + (frame_origin_y + FRAME_H) as f32 * height_scale - half_texel_v,
-        pixel_width: FRAME_W as u32,
-        pixel_height: FRAME_H as u32,
+        u1: rect.u0 + (frame_origin_x + animation.frame_width) as f32 * width_scale - half_texel_u,
+        v1: rect.v0 + (frame_origin_y + animation.frame_height) as f32 * height_scale - half_texel_v,
+        pixel_width: animation.frame_width as u32,
+        pixel_height: animation.frame_height as u32,
+    }
+}
+
+fn animation_frame_column(
+    animation: AnimationDescriptor,
+    frame_step: u32,
+    is_moving: bool,
+) -> usize {
+    match animation.playback {
+        AnimationPlayback::PingPong => walk_frame_col(frame_step, is_moving) as usize,
+        AnimationPlayback::Loop => (frame_step as usize) % animation.columns.max(1),
+    }
+}
+
+fn animation_frame_row(animation: AnimationDescriptor, frame_step: u32) -> usize {
+    if animation.directional_rows {
+        0
+    } else {
+        match animation.playback {
+            AnimationPlayback::PingPong => 0,
+            AnimationPlayback::Loop => (frame_step as usize) % animation.rows.max(1),
+        }
     }
 }
 
@@ -1140,7 +1156,7 @@ fn side_to_row(side: VisibleSide) -> u32 {
 
 fn walk_frame_col(frame_step: u32, is_moving: bool) -> u32 {
     if !is_moving {
-        ANIM_FRAME_COUNT / 2
+        1
     } else {
         WALK_PING_PONG[(frame_step % WALK_PING_PONG.len() as u32) as usize]
     }
