@@ -1,13 +1,45 @@
 
+use crate::texture::{AnimationStyle, FacingMode, VisualId};
+
 pub type PlayerId = u64;
+pub type ObjectId = u64;
 
 #[derive(Clone, Debug)]
-pub struct Sprite {
+pub struct RenderBody {
+    pub visual: VisualId,
+    pub width: f32,
+    pub height: f32,
+    pub facing_mode: FacingMode,
+    pub animation: AnimationStyle,
+}
+
+#[derive(Clone, Debug)]
+pub enum PickupKind {
+    Medkit,
+}
+
+#[derive(Clone, Debug)]
+pub enum ObjectKind {
+    Actor { owner_player: Option<PlayerId> },
+    StaticProp { blocks_movement: bool },
+    Pickup { pickup_kind: PickupKind },
+    Projectile {
+        owner_player: Option<PlayerId>,
+        ttl_ticks: u32,
+        damage: u32,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct WorldObject {
+    pub id: ObjectId,
     pub x: f64,
     pub y: f64,
-    pub texture_index: usize,
-    pub movement_angle: f64,
-    pub is_moving: bool,
+    pub vel_x: f64,
+    pub vel_y: f64,
+    pub radius: f64,
+    pub render: Option<RenderBody>,
+    pub kind: ObjectKind,
 }
 
 #[derive(Clone, Debug)]

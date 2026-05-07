@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
@@ -5,8 +6,9 @@ use glam::{Mat4, Vec3};
 use image::{Rgba, RgbaImage};
 use wgpu::util::DeviceExt;
 
-use crate::model::{Map, Sprite};
-use crate::simulation::PlayerState;
+use crate::model::Map;
+use crate::render_assembly::{RenderBillboard, RenderCamera};
+use crate::texture::{AnimationStyle, FacingMode, TextureKey, TextureManager};
 
 pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 360;
@@ -26,8 +28,6 @@ const ANIM_MS_PER_FRAME: f64 = 90.0;
 const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 const WALL_HEIGHT: f32 = 1.0;
 const CAMERA_HEIGHT: f32 = 0.5;
-const SPRITE_WIDTH: f32 = 0.85;
-const SPRITE_HEIGHT: f32 = 0.85;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
 const SKY_COLOR: wgpu::Color = wgpu::Color {
@@ -127,6 +127,7 @@ pub struct SceneRenderer {
     sprite_vertex_capacity: usize,
     sprite_vertex_count: u32,
     atlas_rects: Vec<AtlasRect>,
+    atlas_index_by_texture: HashMap<TextureKey, usize>,
 }
 
 impl SceneRenderer {
@@ -134,10 +135,16 @@ impl SceneRenderer {
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         map: &Map,
-        textures: &[RgbaImage],
+        texture_manager: &TextureManager,
         surface_format: wgpu::TextureFormat,
     ) -> Self {
-        let (atlas_image, atlas_rects) = build_texture_atlas(textures);
+        let (atlas_image, atlas_rects) = build_texture_atlas(texture_manager.images());
+        let atlas_index_by_texture = texture_manager
+            .images()
+            .iter()
+            .enumerate()
+            .map(|(index, _)| (texture_manager.key_at_index(index), index))
+            .collect();
         let atlas_size = atlas_image.dimensions();
         let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cpu_game_texture_atlas"),
@@ -603,7 +610,7 @@ impl SceneRenderer {
             cache: None,
         });
 
-        let (wall_vertices, wall_indices) = build_wall_mesh(map, &atlas_rects);
+        let (wall_vertices, wall_indices) = build_wall_mesh(map, &atlas_rects, texture_manager);
         let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_wall_vertices"),
             contents: bytemuck::cast_slice(&wall_vertices),
@@ -643,6 +650,7 @@ impl SceneRenderer {
             sprite_vertex_capacity,
             sprite_vertex_count: 0,
             atlas_rects,
+            atlas_index_by_texture,
         }
     }
 
@@ -651,12 +659,12 @@ impl SceneRenderer {
         encoder: &mut wgpu::CommandEncoder,
         output_view: &wgpu::TextureView,
         viewport: (u32, u32, u32, u32),
-        player: &PlayerState,
-        sprites: &[Sprite],
+        camera: &RenderCamera,
+        billboards: &[RenderBillboard],
         anim_elapsed_ms: f64,
         frame_number: u64,
     ) {
-        let view_proj = build_view_projection(player);
+        let view_proj = build_view_projection(camera);
         self.queue.write_buffer(
             &self.scene_uniform_buffer,
             0,
@@ -675,7 +683,13 @@ impl SceneRenderer {
             bytemuck::bytes_of(&build_decode_uniforms()),
         );
 
-        let sprite_vertices = build_sprite_vertices(player, sprites, &self.atlas_rects, anim_elapsed_ms);
+        let sprite_vertices = build_sprite_vertices(
+            camera,
+            billboards,
+            &self.atlas_rects,
+            &self.atlas_index_by_texture,
+            anim_elapsed_ms,
+        );
         self.ensure_sprite_capacity(sprite_vertices.len());
         if !sprite_vertices.is_empty() {
             self.queue.write_buffer(
@@ -824,11 +838,11 @@ fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::
     })
 }
 
-fn build_view_projection(player: &PlayerState) -> Mat4 {
-    let plane_len = ((player.plane_x * player.plane_x) + (player.plane_y * player.plane_y)).sqrt();
+fn build_view_projection(camera: &RenderCamera) -> Mat4 {
+    let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt();
     let fov = 2.0 * plane_len.atan() as f32;
-    let eye = Vec3::new(player.x as f32, CAMERA_HEIGHT, player.y as f32);
-    let forward = Vec3::new(player.dir_x as f32, 0.0, player.dir_y as f32);
+    let eye = Vec3::new(camera.x as f32, CAMERA_HEIGHT, camera.y as f32);
+    let forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
     let view = Mat4::look_to_lh(eye, forward, Vec3::Y);
     let projection = Mat4::perspective_lh(
         fov,
@@ -895,7 +909,11 @@ fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
     (atlas, rects)
 }
 
-fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, Vec<u32>) {
+fn build_wall_mesh(
+    map: &Map,
+    atlas_rects: &[AtlasRect],
+    texture_manager: &TextureManager,
+) -> (Vec<SceneVertex>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     let height = map.tiles.len();
@@ -907,9 +925,8 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
                 continue;
             }
 
-            let texture_index = map
-                .tile_at(x, z)
-                .saturating_sub(1) as usize;
+            let texture_key = texture_manager.wall_texture(map.tile_at(x, z));
+            let texture_index = texture_manager.texture_index(texture_key);
             let rect = atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))];
             let x0 = x as f32;
             let x1 = x0 + 1.0;
@@ -976,30 +993,35 @@ fn build_wall_mesh(map: &Map, atlas_rects: &[AtlasRect]) -> (Vec<SceneVertex>, V
 }
 
 fn build_sprite_vertices(
-    player: &PlayerState,
-    sprites: &[Sprite],
+    camera: &RenderCamera,
+    billboards: &[RenderBillboard],
     atlas_rects: &[AtlasRect],
+    atlas_index_by_texture: &HashMap<TextureKey, usize>,
     anim_elapsed_ms: f64,
 ) -> Vec<SceneVertex> {
-    let mut sorted = sprites.to_vec();
+    let mut sorted = billboards.to_vec();
     sorted.sort_by(|left, right| {
-        let left_dist = (left.x - player.x).powi(2) + (left.y - player.y).powi(2);
-        let right_dist = (right.x - player.x).powi(2) + (right.y - player.y).powi(2);
+        let left_dist = (left.x - camera.x).powi(2) + (left.y - camera.y).powi(2);
+        let right_dist = (right.x - camera.x).powi(2) + (right.y - camera.y).powi(2);
         right_dist.total_cmp(&left_dist)
     });
 
-    let right = Vec3::new(player.plane_x as f32, 0.0, player.plane_y as f32).normalize_or_zero();
-    let half_width = right * (SPRITE_WIDTH * 0.5);
-    let up = Vec3::new(0.0, SPRITE_HEIGHT, 0.0);
+    let right = Vec3::new(camera.plane_x as f32, 0.0, camera.plane_y as f32).normalize_or_zero();
     let mut vertices = Vec::with_capacity(sorted.len() * 6);
-    let camera_facing_angle = player.dir_y.atan2(player.dir_x);
+    let camera_facing_angle = camera.dir_y.atan2(camera.dir_x);
 
-    for sprite in sorted {
-        let Some(rect) = atlas_rects.get(sprite.texture_index) else {
+    for billboard in sorted {
+        let Some(texture_index) = atlas_index_by_texture.get(&billboard.texture).copied() else {
             continue;
         };
-        let uv_rect = select_sprite_uv_rect(*rect, &sprite, camera_facing_angle, anim_elapsed_ms);
-        let center = Vec3::new(sprite.x as f32, 0.0, sprite.y as f32);
+        let Some(rect) = atlas_rects.get(texture_index) else {
+            continue;
+        };
+        let uv_rect =
+            select_sprite_uv_rect(*rect, &billboard, camera_facing_angle, anim_elapsed_ms);
+        let center = Vec3::new(billboard.x as f32, 0.0, billboard.y as f32);
+        let half_width = right * (billboard.width * 0.5);
+        let up = Vec3::new(0.0, billboard.height, 0.0);
         let bottom_left = center - half_width;
         let bottom_right = center + half_width;
         let top_left = bottom_left + up;
@@ -1038,7 +1060,7 @@ fn build_sprite_vertices(
 
 fn select_sprite_uv_rect(
     rect: AtlasRect,
-    sprite: &Sprite,
+    billboard: &RenderBillboard,
     camera_facing_angle: f64,
     anim_elapsed_ms: f64,
 ) -> AtlasRect {
@@ -1048,12 +1070,20 @@ fn select_sprite_uv_rect(
         return rect;
     }
 
+    if !matches!(billboard.animation, AnimationStyle::WalkPingPong) {
+        return rect;
+    }
+
     let frame_step = (anim_elapsed_ms / ANIM_MS_PER_FRAME).floor() as u32;
-    let frame_col = walk_frame_col(frame_step, sprite.is_moving) as usize;
-    let side_row = side_to_row(get_visible_side(
-        sprite.movement_angle,
-        camera_facing_angle,
-    )) as usize;
+    let frame_col = walk_frame_col(frame_step, billboard.is_moving) as usize;
+    let side_row = if matches!(billboard.facing_mode, FacingMode::Movement) {
+        side_to_row(get_visible_side(
+            billboard.movement_angle,
+            camera_facing_angle,
+        )) as usize
+    } else {
+        0
+    };
 
     let frame_origin_x = frame_col * FRAME_W;
     let frame_origin_y = side_row * FRAME_H;

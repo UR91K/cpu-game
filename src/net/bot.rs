@@ -33,8 +33,8 @@ impl WaypointBot {
             Some(s) => s,
             None => return 0.0,
         };
-        let player = match state.players.get(&self.id) {
-            Some(p) => p,
+        let actor = match state.controlled_object(self.id) {
+            Some(actor) => actor,
             None => return 0.0,
         };
 
@@ -43,8 +43,8 @@ impl WaypointBot {
         }
 
         let waypoint = &self.waypoints[self.current_waypoint];
-        let dx = waypoint.x - player.x;
-        let dy = waypoint.y - player.y;
+        let dx = waypoint.x - actor.x;
+        let dy = waypoint.y - actor.y;
         let dist = (dx * dx + dy * dy).sqrt();
 
         // advance to next waypoint when close enough
@@ -55,6 +55,10 @@ impl WaypointBot {
         // cross product of current direction vs desired direction gives signed turn
         let desired_x = dx / dist.max(1e-6);
         let desired_y = dy / dist.max(1e-6);
+        let player = match state.players.get(&self.id) {
+            Some(player) => player,
+            None => return 0.0,
+        };
         let cross = player.dir_x * desired_y - player.dir_y * desired_x;
         cross * 0.05
     }

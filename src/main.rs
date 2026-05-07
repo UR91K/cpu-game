@@ -9,11 +9,13 @@ mod input;
 mod map;
 mod model;
 mod net;
+mod render_assembly;
 mod simulation;
 mod texture;
 
 use app::App;
 use map::load_embedded_map;
+use model::PickupKind;
 use net::bot::WaypointBot;
 use net::client::LocalClient;
 use net::server::Server;
@@ -22,7 +24,7 @@ use crate::net::bot::Waypoint;
 
 fn main() {
     let map = Arc::new(load_embedded_map());
-    let textures = texture::load_textures();
+    let texture_manager = texture::TextureManager::load();
 
     let mut server = Server::new(Arc::clone(&map));
 
@@ -48,8 +50,11 @@ fn main() {
     );
     server.add_client(Box::new(bot), 18.0, 11.0);
 
+    // server.spawn_static_prop(18.5, 9.5);
+    server.spawn_pickup(15.5, 11.0, PickupKind::Medkit);
+
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App::new(server, input_queue, HUMAN_ID, textures);
+    let mut app = App::new(server, input_queue, HUMAN_ID, texture_manager);
     event_loop.run_app(&mut app).unwrap();
 }
 

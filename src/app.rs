@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
-use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
@@ -12,6 +12,8 @@ use crate::gpu_renderer::{SceneRenderer, SCENE_HEIGHT, SCENE_WIDTH};
 use crate::input::InputMessage;
 use crate::model::PlayerId;
 use crate::net::server::Server;
+use crate::render_assembly;
+use crate::texture::TextureManager;
 
 const TARGET_FPS: u64 = 60;
 
@@ -38,15 +40,21 @@ pub struct App {
     last_frame: Instant,
     frame_duration: Duration,
     mouse_sensitivity: f64,
-    textures: Option<Vec<image::RgbaImage>>,
+    texture_manager: Option<TextureManager>,
     current_tick: u64,
     anim_elapsed_ms: f64,
     mouse_capture_mode: MouseCaptureMode,
     ignore_next_motion: bool,
+    pending_fire: bool,
 }
 
 impl App {
-    pub fn new(server: Server, input_queue: Arc<Mutex<VecDeque<InputMessage>>>, human_id: PlayerId, textures: Vec<image::RgbaImage>) -> Self {
+    pub fn new(
+        server: Server,
+        input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
+        human_id: PlayerId,
+        texture_manager: TextureManager,
+    ) -> Self {
         Self {
             state: None,
             server,
@@ -56,11 +64,12 @@ impl App {
             last_frame: Instant::now(),
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
-            textures: Some(textures),
+            texture_manager: Some(texture_manager),
             current_tick: 0,
             anim_elapsed_ms: 0.0,
             mouse_capture_mode: MouseCaptureMode::None,
             ignore_next_motion: false,
+            pending_fire: false,
         }
     }
 
@@ -122,6 +131,7 @@ impl App {
             back: self.keys.contains(&KeyCode::KeyS),
             strafe_left: self.keys.contains(&KeyCode::KeyA),
             strafe_right: self.keys.contains(&KeyCode::KeyD),
+            fire: std::mem::take(&mut self.pending_fire),
             rotate_delta: 0.0, // Mouse rotation is accumulated via device events; see below.
         };
         self.input_queue.lock().unwrap().push_back(msg);
@@ -145,11 +155,10 @@ impl App {
             return;
         };
 
-        let player = match self.server.state.players.get(&self.human_id) {
-            Some(p) => p.clone(),
+        let scene = match render_assembly::assemble_scene(&self.server.state, self.human_id) {
+            Some(scene) => scene,
             None => return,
         };
-        let sprites = self.server.state.sprites.clone();
 
         let output = match state.surface.get_current_texture() {
             Ok(output) => output,
@@ -188,8 +197,8 @@ impl App {
                 &mut encoder,
                 &view,
                 (vx, vy, vw, vh),
-                &player,
-                &sprites,
+                &scene.camera,
+                &scene.billboards,
                 self.anim_elapsed_ms,
                 self.current_tick,
             );
@@ -251,15 +260,15 @@ impl ApplicationHandler for App {
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
 
-        let textures = self
-            .textures
+        let texture_manager = self
+            .texture_manager
             .take()
-            .expect("textures should only be consumed once");
+            .expect("texture manager should only be consumed once");
         let renderer = SceneRenderer::new(
             device.clone(),
             queue.clone(),
             &self.server.map,
-            &textures,
+            &texture_manager,
             surface_format,
         );
 
@@ -312,6 +321,11 @@ impl ApplicationHandler for App {
                         }
                         return;
                     }
+
+                    if code == KeyCode::Space && event.state == ElementState::Pressed {
+                        self.pending_fire = true;
+                    }
+
                     match event.state {
                         ElementState::Pressed => {
                             self.keys.insert(code);
@@ -322,17 +336,23 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Released,
-                ..
-            } => {
-                if self.mouse_capture_mode == MouseCaptureMode::None {
+            WindowEvent::MouseInput { state: mouse_state, button, .. } => {
+                if mouse_state == ElementState::Released
+                    && self.mouse_capture_mode == MouseCaptureMode::None
+                {
                     if let Some(state) = &self.state {
                         self.mouse_capture_mode =
                             Self::set_mouse_capture(state.window.as_ref(), true);
                         self.ignore_next_motion =
                             self.mouse_capture_mode != MouseCaptureMode::None;
                     }
+                }
+
+                if mouse_state == ElementState::Pressed
+                    && button == MouseButton::Left
+                    && self.mouse_capture_mode != MouseCaptureMode::None
+                {
+                    self.pending_fire = true;
                 }
             }
             WindowEvent::RedrawRequested => {
