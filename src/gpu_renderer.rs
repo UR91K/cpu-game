@@ -921,7 +921,9 @@ fn build_static_mesh(
         for x in 0..width {
             if !map.is_wall(x, z) {
                 let texture_index = texture_manager.texture_index(TextureKey::Floor(map.floor_at(x, z)));
-                let rect = atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))];
+                let rect = inset_atlas_rect_half_texel(
+                    atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))],
+                );
                 let x0 = x as f32;
                 let x1 = x0 + 1.0;
                 let z0 = z as f32;
@@ -942,7 +944,9 @@ fn build_static_mesh(
 
             let texture_key = texture_manager.wall_texture(map.tile_at(x, z));
             let texture_index = texture_manager.texture_index(texture_key);
-            let rect = atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))];
+            let rect = inset_atlas_rect_half_texel(
+                atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))],
+            );
             let x0 = x as f32;
             let x1 = x0 + 1.0;
             let z0 = z as f32;
@@ -1005,6 +1009,22 @@ fn build_static_mesh(
     }
 
     (vertices, indices)
+}
+
+fn inset_atlas_rect_half_texel(rect: AtlasRect) -> AtlasRect {
+    let width_scale = (rect.u1 - rect.u0) / rect.pixel_width.max(1) as f32;
+    let height_scale = (rect.v1 - rect.v0) / rect.pixel_height.max(1) as f32;
+    let half_texel_u = width_scale * 0.5;
+    let half_texel_v = height_scale * 0.5;
+
+    AtlasRect {
+        u0: rect.u0 + half_texel_u,
+        v0: rect.v0 + half_texel_v,
+        u1: rect.u1 - half_texel_u,
+        v1: rect.v1 - half_texel_v,
+        pixel_width: rect.pixel_width,
+        pixel_height: rect.pixel_height,
+    }
 }
 
 fn build_sprite_vertices(
