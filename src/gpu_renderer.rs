@@ -605,7 +605,7 @@ impl SceneRenderer {
             cache: None,
         });
 
-        let (wall_vertices, wall_indices) = build_wall_mesh(map, &atlas_rects, texture_manager);
+        let (wall_vertices, wall_indices) = build_static_mesh(map, &atlas_rects, texture_manager);
         let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_wall_vertices"),
             contents: bytemuck::cast_slice(&wall_vertices),
@@ -904,7 +904,7 @@ fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
     (atlas, rects)
 }
 
-fn build_wall_mesh(
+fn build_static_mesh(
     map: &Map,
     atlas_rects: &[AtlasRect],
     texture_manager: &TextureManager,
@@ -917,6 +917,23 @@ fn build_wall_mesh(
     for z in 0..height {
         for x in 0..width {
             if !map.is_wall(x, z) {
+                let texture_index = texture_manager.texture_index(TextureKey::Floor(map.floor_at(x, z)));
+                let rect = atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))];
+                let x0 = x as f32;
+                let x1 = x0 + 1.0;
+                let z0 = z as f32;
+                let z1 = z0 + 1.0;
+
+                push_quad(
+                    &mut vertices,
+                    &mut indices,
+                    rect,
+                    false,
+                    [x0, 0.0, z1],
+                    [x1, 0.0, z1],
+                    [x1, 0.0, z0],
+                    [x0, 0.0, z0],
+                );
                 continue;
             }
 

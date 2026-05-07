@@ -12,6 +12,12 @@ pub enum WallTexture {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FloorTexture {
+    Smooth,
+    MilkVeins,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemTexture {
     Health,
 }
@@ -29,6 +35,7 @@ pub enum ProjectileTexture {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureKey {
     Wall(WallTexture),
+    Floor(FloorTexture),
     Item(ItemTexture),
     Actor(ActorTexture),
     Projectile(ProjectileTexture),
@@ -173,6 +180,8 @@ impl TextureManager {
             TextureKey::Wall(WallTexture::Green),
             TextureKey::Wall(WallTexture::Orange),
             TextureKey::Wall(WallTexture::Grey),
+            TextureKey::Floor(FloorTexture::Smooth),
+            TextureKey::Floor(FloorTexture::MilkVeins),
             TextureKey::Item(ItemTexture::Health),
             TextureKey::Actor(ActorTexture::Red),
             TextureKey::Projectile(ProjectileTexture::Spiral),
@@ -244,6 +253,8 @@ fn parse_texture_key(stem: &str) -> Option<TextureKey> {
         "wall.green" => Some(TextureKey::Wall(WallTexture::Green)),
         "wall.orange" => Some(TextureKey::Wall(WallTexture::Orange)),
         "wall.grey" => Some(TextureKey::Wall(WallTexture::Grey)),
+        "floor.smooth" => Some(TextureKey::Floor(FloorTexture::Smooth)),
+        "floor.milkveins" => Some(TextureKey::Floor(FloorTexture::MilkVeins)),
         "item.health" => Some(TextureKey::Item(ItemTexture::Health)),
         "actor.red" => Some(TextureKey::Actor(ActorTexture::Red)),
         "projectile.spiral" => Some(TextureKey::Projectile(ProjectileTexture::Spiral)),
@@ -256,9 +267,11 @@ fn texture_sort_key(key: TextureKey) -> (u8, u8) {
         TextureKey::Wall(WallTexture::Green) => (0, 0),
         TextureKey::Wall(WallTexture::Orange) => (0, 1),
         TextureKey::Wall(WallTexture::Grey) => (0, 2),
-        TextureKey::Item(ItemTexture::Health) => (1, 0),
-        TextureKey::Actor(ActorTexture::Red) => (2, 0),
-        TextureKey::Projectile(ProjectileTexture::Spiral) => (3, 0),
+        TextureKey::Floor(FloorTexture::Smooth) => (1, 0),
+        TextureKey::Floor(FloorTexture::MilkVeins) => (1, 1),
+        TextureKey::Item(ItemTexture::Health) => (2, 0),
+        TextureKey::Actor(ActorTexture::Red) => (3, 0),
+        TextureKey::Projectile(ProjectileTexture::Spiral) => (4, 0),
     }
 }
 
