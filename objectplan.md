@@ -1,4 +1,28 @@
 
+## Implemented Object Pipeline
+
+The runtime now follows the intended object-backed flow:
+
+- `simulation::GameState` owns `players`, `objects`, `tick`, and `next_object_id`.
+- `simulation::PlayerState` stores controller/view state plus `controlled_object`.
+- `model::WorldObject` is the authoritative record for actors, static props, pickups, and projectiles.
+- `render_assembly::assemble_scene` converts authoritative objects into a `RenderScene` with a `RenderCamera` and `RenderBillboard` list.
+- `app::render` consumes `RenderScene` instead of reading `players` and a derived sprite list directly.
+- `gpu_renderer` and `renderer` now render from billboard data assembled from world objects.
+
+Current seeded gameplay objects:
+
+- Player actors are spawned as `ObjectKind::Actor` instances when clients join.
+- One static prop is seeded during startup to exercise blocking-object rendering and movement collision.
+- One pickup is seeded during startup and removed when an actor overlaps it.
+- Projectiles spawn from the local player's fire intent and despawn on wall, prop, actor impact, or TTL expiry.
+
+Current constraints and follow-up notes:
+
+- Prop and pickup spawn points are currently seeded directly in `main.rs`; map-authored object spawning is still a future extension.
+- Projectile collision currently despawns on actor contact without applying health or damage state because no combat health model exists yet.
+- The renderer still uses some internal billboard buffers and helper names inherited from the old path, but gameplay no longer rebuilds or depends on a shared sprite list.
+
 The current bottleneck is exactly where you called it out: simulation.rs stores both player state and a sprite list, and simulation.rs rebuilds that sprite list from players every tick. Then app.rs pulls camera data directly from players and app.rs passes the derived sprites into both renderers. That means “things that can be seen” are not first-class simulation objects, they are a render-side projection of players only.
 
 **Target Shape**
