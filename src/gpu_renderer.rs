@@ -25,12 +25,15 @@ const WALL_HEIGHT: f32 = 1.0;
 const CAMERA_HEIGHT: f32 = 0.5;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
-const SKY_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.08,
-    g: 0.09,
-    b: 0.12,
-    a: 1.0,
-};
+const SKY_COLOR: &str = "#8489f0"; // Light blue
+
+fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
+    let [r, g, b] = [1, 3, 5].map(|i| {
+        u8::from_str_radix(&hex[i..i+2], 16).unwrap() as f64 / 255.0
+    });
+    wgpu::Color { r, g, b, a: 1.0 }
+}
+
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -702,7 +705,7 @@ impl SceneRenderer {
                     view: &self.scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(SKY_COLOR),
+                        load: wgpu::LoadOp::Clear(wgpucolor_from_hex_str(SKY_COLOR)),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,

@@ -46,6 +46,7 @@ pub struct GameState {
     pub objects: HashMap<ObjectId, WorldObject>,
     pub tick: u64,
     pub next_object_id: ObjectId,
+    
 }
 
 impl GameState {
