@@ -837,17 +837,17 @@ fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::
 }
 
 fn build_view_projection(camera: &RenderCamera) -> Mat4 {
-    let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt();
-    let fov = 2.0 * plane_len.atan() as f32;
+    let aspect = SCENE_WIDTH as f32 / SCENE_HEIGHT as f32;
+    let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
+    // plane_len is tan(half_hfov), convert to vfov for perspective_lh
+    let half_hfov = plane_len.atan();
+    let half_vfov = (half_hfov / aspect).atan();
+    let vfov = 2.0 * half_vfov;
+
     let eye = Vec3::new(camera.x as f32, CAMERA_HEIGHT, camera.y as f32);
     let forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
     let view = Mat4::look_to_lh(eye, forward, Vec3::Y);
-    let projection = Mat4::perspective_lh(
-        fov,
-        SCENE_WIDTH as f32 / SCENE_HEIGHT as f32,
-        NEAR_PLANE,
-        FAR_PLANE,
-    );
+    let projection = Mat4::perspective_lh(vfov, aspect, NEAR_PLANE, FAR_PLANE);
     projection * view
 }
 
