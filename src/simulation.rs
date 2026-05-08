@@ -220,6 +220,14 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         move_dir_y += plane_y;
     }
 
+    // normalize movement
+    let move_len_sq = move_dir_x * move_dir_x + move_dir_y * move_dir_y;
+    if move_len_sq > 0.0 {
+        let move_len = move_len_sq.sqrt();
+        move_dir_x /= move_len;
+        move_dir_y /= move_len;
+    }
+
     let Some(actor) = state.objects.get_mut(&controlled_object) else {
         return;
     };
@@ -540,4 +548,62 @@ fn blocks_movement(object: &WorldObject) -> bool {
             blocks_movement: true
         }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_input, GameState, PlayerState, TICK_DT};
+    use crate::input::InputMessage;
+    use crate::model::Map;
+
+    #[test]
+    fn diagonal_movement_matches_straight_line_speed() {
+        let map = Map::new(vec![vec![0; 5]; 5]);
+        let forward_state = make_state();
+        let diagonal_state = make_state();
+
+        let mut forward_input = InputMessage {
+            player_id: 1,
+            forward: true,
+            ..InputMessage::default()
+        };
+        let diagonal_input = InputMessage {
+            player_id: 1,
+            forward: true,
+            strafe_right: true,
+            ..InputMessage::default()
+        };
+
+        let mut forward_state = forward_state;
+        let mut diagonal_state = diagonal_state;
+
+        apply_input(&mut forward_state, &forward_input, &map, TICK_DT);
+        apply_input(&mut diagonal_state, &diagonal_input, &map, TICK_DT);
+
+        let forward_actor = forward_state.objects.get(&1).unwrap();
+        let diagonal_actor = diagonal_state.objects.get(&1).unwrap();
+        let forward_speed = (forward_actor.vel_x * forward_actor.vel_x
+            + forward_actor.vel_y * forward_actor.vel_y)
+            .sqrt();
+        let diagonal_speed = (diagonal_actor.vel_x * diagonal_actor.vel_x
+            + diagonal_actor.vel_y * diagonal_actor.vel_y)
+            .sqrt();
+
+        assert!((diagonal_speed - forward_speed).abs() < 1e-9);
+
+        forward_input.strafe_right = true;
+        apply_input(&mut forward_state, &forward_input, &map, TICK_DT);
+        let forward_actor = forward_state.objects.get(&1).unwrap();
+        let post_turn_speed = (forward_actor.vel_x * forward_actor.vel_x
+            + forward_actor.vel_y * forward_actor.vel_y)
+            .sqrt();
+        assert!(post_turn_speed >= forward_speed);
+    }
+
+    fn make_state() -> GameState {
+        let mut state = GameState::new();
+        let actor_id = state.spawn_actor(2.5, 2.5, Some(1));
+        state.players.insert(1, PlayerState::new(actor_id));
+        state
+    }
 }
