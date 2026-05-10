@@ -25,6 +25,7 @@ const WALL_HEIGHT: f32 = 1.0;
 const CAMERA_HEIGHT: f32 = 0.5;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
+const AFFINE_BLEND: f32 = 0.2;
 const SKY_COLOR: &str = "#8489f0"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
@@ -59,6 +60,7 @@ impl SceneVertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SceneUniforms {
     view_proj: [[f32; 4]; 4],
+    affine_params: [f32; 4],
 }
 
 #[repr(C)]
@@ -279,6 +281,7 @@ impl SceneRenderer {
             label: Some("cpu_game_scene_uniforms"),
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+                affine_params: [AFFINE_BLEND, 0.0, 0.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -327,7 +330,7 @@ impl SceneRenderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -668,6 +671,7 @@ impl SceneRenderer {
             0,
             bytemuck::bytes_of(&SceneUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
+                affine_params: [AFFINE_BLEND, 0.0, 0.0, 0.0],
             }),
         );
         self.queue.write_buffer(
@@ -1214,7 +1218,7 @@ fn push_quad(
 ) {
     // Subdivide each quad into a 2x2 grid (4 sub-quads = 8 triangles) via bilinear interpolation.
     // Corner parameterization: p0=(s=0,t=0), p1=(s=1,t=0), p2=(s=1,t=1), p3=(s=0,t=1)
-    const DIVS: usize = 4;
+    const DIVS: usize = 1;
 
     let (left_u, right_u) = if flip_u {
         (rect.u1, rect.u0)

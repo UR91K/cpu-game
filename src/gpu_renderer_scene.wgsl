@@ -1,5 +1,6 @@
 struct SceneUniforms {
     view_proj: mat4x4<f32>,
+    affine_params: vec4<f32>,
 };
 
 @group(0) @binding(0) var t_atlas: texture_2d<f32>;
@@ -13,24 +14,26 @@ struct VertexIn {
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
-    @location(0) uv_times_w: vec2<f32>,
-    @location(1) clip_w: f32,
+    @location(0) uv: vec2<f32>,
+    @location(1) affine_uv: vec3<f32>,
 };
 
 @vertex
 fn vs_main(input: VertexIn) -> VertexOut {
     var out: VertexOut;
-    out.position = uniforms.view_proj * vec4(input.position, 1.0);
-    out.uv_times_w = input.uv * out.position.w;
-    out.clip_w = out.position.w;
+    let clip = uniforms.view_proj * vec4(input.position, 1.0);
+    out.position = clip;
+    out.uv = input.uv;
+    out.affine_uv = vec3(input.uv * clip.w, clip.w);
     return out;
 }
 
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
-    let w_sign = select(-1.0, 1.0, input.clip_w >= 0.0);
-    let w = w_sign * max(abs(input.clip_w), 1e-6);
-    let uv = input.uv_times_w / w;
+    let w_sign = select(-1.0, 1.0, input.affine_uv.z >= 0.0);
+    let w = w_sign * max(abs(input.affine_uv.z), 1e-6);
+    let affine = input.affine_uv.xy / w;
+    let uv = mix(input.uv, affine, uniforms.affine_params.x);
     let color = textureSample(t_atlas, s_atlas, uv);
     if (color.a < 0.05) {
         discard;
