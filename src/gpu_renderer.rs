@@ -13,12 +13,13 @@ use crate::texture::{
 };
 
 pub const SCENE_WIDTH: u32 = 640;
-pub const SCENE_HEIGHT: u32 = 360;
+pub const SCENE_HEIGHT: u32 = 480;
 const COMPOSITE_WIDTH: u32 = SCENE_WIDTH * 4;
 const COMPOSITE_HEIGHT: u32 = SCENE_HEIGHT;
 const DECODED_WIDTH: u32 = SCENE_WIDTH * 2;
 const DECODED_HEIGHT: u32 = SCENE_HEIGHT;
 const CHROMA_MOD_FREQ: f32 = 4.0 * std::f32::consts::PI / 15.0;
+const NTSC_PHASE_FLIP_HZ: f32 = 29.97002997;
 
 const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 const WALL_HEIGHT: f32 = 1.0;
@@ -26,6 +27,8 @@ const CAMERA_HEIGHT: f32 = 0.5;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
 const AFFINE_BLEND: f32 = 0.2;
+const SNAP_WIDTH: f32 = SCENE_WIDTH as f32 / 2.0;
+const SNAP_HEIGHT: f32 = SCENE_HEIGHT as f32 / 2.0;
 const SKY_COLOR: &str = "#8489f0"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
@@ -61,6 +64,7 @@ impl SceneVertex {
 struct SceneUniforms {
     view_proj: [[f32; 4]; 4],
     affine_params: [f32; 4],
+    snap_params: [f32; 4],
 }
 
 #[repr(C)]
@@ -281,7 +285,8 @@ impl SceneRenderer {
             label: Some("cpu_game_scene_uniforms"),
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
-                affine_params: [AFFINE_BLEND, 0.0, 0.0, 0.0],
+                affine_params: [AFFINE_BLEND, SCENE_WIDTH as f32, SCENE_HEIGHT as f32, 0.0],
+                snap_params: [SNAP_WIDTH, SNAP_HEIGHT, 0.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -663,7 +668,7 @@ impl SceneRenderer {
         camera: &RenderCamera,
         billboards: &[RenderBillboard],
         anim_elapsed_ms: f64,
-        frame_number: u64,
+        _frame_number: u64,
     ) {
         let view_proj = build_view_projection(camera);
         self.queue.write_buffer(
@@ -671,13 +676,14 @@ impl SceneRenderer {
             0,
             bytemuck::bytes_of(&SceneUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
-                affine_params: [AFFINE_BLEND, 0.0, 0.0, 0.0],
+                affine_params: [AFFINE_BLEND, SCENE_WIDTH as f32, SCENE_HEIGHT as f32, 0.0],
+                snap_params: [SNAP_WIDTH, SNAP_HEIGHT, 0.0, 0.0],
             }),
         );
         self.queue.write_buffer(
             &self.ntsc_encode_uniform_buffer,
             0,
-            bytemuck::bytes_of(&build_encode_uniforms(frame_number)),
+            bytemuck::bytes_of(&build_encode_uniforms(anim_elapsed_ms)),
         );
         self.queue.write_buffer(
             &self.ntsc_decode_uniform_buffer,
@@ -855,11 +861,14 @@ fn build_view_projection(camera: &RenderCamera) -> Mat4 {
     projection * view
 }
 
-fn build_encode_uniforms(frame_number: u64) -> NtscEncodeUniforms {
+fn build_encode_uniforms(anim_elapsed_ms: f64) -> NtscEncodeUniforms {
+    let elapsed_seconds = (anim_elapsed_ms * 0.001) as f32;
+    let frame_phase = (elapsed_seconds * NTSC_PHASE_FLIP_HZ).floor().rem_euclid(2.0);
+
     NtscEncodeUniforms {
         source_size: [SCENE_WIDTH as f32, SCENE_HEIGHT as f32],
         output_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
-        frame_phase: (frame_number & 1) as f32,
+        frame_phase,
         chroma_mod_freq: CHROMA_MOD_FREQ,
         _pad0: [0.0; 2],
         mix_row0: [1.0, 1.0, 1.0, 0.0],
