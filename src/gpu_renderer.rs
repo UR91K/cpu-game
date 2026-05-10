@@ -14,10 +14,6 @@ use crate::texture::{
 
 pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 480;
-const COMPOSITE_WIDTH: u32 = SCENE_WIDTH * 4;
-const COMPOSITE_HEIGHT: u32 = SCENE_HEIGHT;
-const DECODED_WIDTH: u32 = SCENE_WIDTH * 2;
-const DECODED_HEIGHT: u32 = SCENE_HEIGHT;
 const CHROMA_MOD_FREQ: f32 = 4.0 * std::f32::consts::PI / 15.0;
 const NTSC_PHASE_FLIP_HZ: f32 = 29.97002997;
 
@@ -27,8 +23,6 @@ const CAMERA_HEIGHT: f32 = 0.5;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
 const AFFINE_BLEND: f32 = 0.2;
-const SNAP_WIDTH: f32 = SCENE_WIDTH as f32 / 2.0;
-const SNAP_HEIGHT: f32 = SCENE_HEIGHT as f32 / 2.0;
 const SKY_COLOR: &str = "#8489f0"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
@@ -109,6 +103,8 @@ enum VisibleSide {
 pub struct SceneRenderer {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
+    scene_width: u32,
+    scene_height: u32,
     scene_view: wgpu::TextureView,
     composite_view: wgpu::TextureView,
     decoded_view: wgpu::TextureView,
@@ -141,7 +137,13 @@ impl SceneRenderer {
         map: &Map,
         texture_manager: &TextureManager,
         surface_format: wgpu::TextureFormat,
+        scene_width: u32,
+        scene_height: u32,
     ) -> Self {
+        let composite_width = scene_width * 4;
+        let composite_height = scene_height;
+        let decoded_width = scene_width * 2;
+        let decoded_height = scene_height;
         let (atlas_image, atlas_rects) = build_texture_atlas(texture_manager.images());
         let atlas_index_by_texture = texture_manager
             .images()
@@ -199,8 +201,8 @@ impl SceneRenderer {
         let scene_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cpu_game_scene_texture"),
             size: wgpu::Extent3d {
-                width: SCENE_WIDTH,
-                height: SCENE_HEIGHT,
+                width: scene_width,
+                height: scene_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -215,8 +217,8 @@ impl SceneRenderer {
         let composite_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cpu_game_composite_texture"),
             size: wgpu::Extent3d {
-                width: COMPOSITE_WIDTH,
-                height: COMPOSITE_HEIGHT,
+                width: composite_width,
+                height: composite_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -231,8 +233,8 @@ impl SceneRenderer {
         let decoded_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cpu_game_decoded_texture"),
             size: wgpu::Extent3d {
-                width: DECODED_WIDTH,
-                height: DECODED_HEIGHT,
+                width: decoded_width,
+                height: decoded_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -268,8 +270,8 @@ impl SceneRenderer {
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("cpu_game_scene_depth"),
             size: wgpu::Extent3d {
-                width: SCENE_WIDTH,
-                height: SCENE_HEIGHT,
+                width: scene_width,
+                height: scene_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -285,32 +287,23 @@ impl SceneRenderer {
             label: Some("cpu_game_scene_uniforms"),
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
-                affine_params: [AFFINE_BLEND, SCENE_WIDTH as f32, SCENE_HEIGHT as f32, 0.0],
-                snap_params: [SNAP_WIDTH, SNAP_HEIGHT, 0.0, 0.0],
+                affine_params: [AFFINE_BLEND, scene_width as f32, scene_height as f32, 0.0],
+                snap_params: [scene_width as f32 / 2.0, scene_height as f32 / 2.0, 0.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let ntsc_encode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_ntsc_encode_uniforms"),
-            contents: bytemuck::bytes_of(&NtscEncodeUniforms {
-                source_size: [SCENE_WIDTH as f32, SCENE_HEIGHT as f32],
-                output_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
-                frame_phase: 0.0,
-                chroma_mod_freq: CHROMA_MOD_FREQ,
-                _pad0: [0.0; 2],
-                mix_row0: [1.0, 1.0, 1.0, 0.0],
-                mix_row1: [1.0, 2.0, 0.0, 0.0],
-                mix_row2: [1.0, 0.0, 2.0, 0.0],
-            }),
+            contents: bytemuck::bytes_of(&build_encode_uniforms(
+                scene_width,
+                scene_height,
+                0.0,
+            )),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let ntsc_decode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_ntsc_decode_uniforms"),
-            contents: bytemuck::bytes_of(&NtscDecodeUniforms {
-                source_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
-                gamma_exp: 1.25,
-                _pad0: 0.0,
-            }),
+            contents: bytemuck::bytes_of(&build_decode_uniforms(composite_width, composite_height)),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -634,6 +627,8 @@ impl SceneRenderer {
         Self {
             device,
             queue,
+            scene_width,
+            scene_height,
             scene_view,
             composite_view,
             decoded_view,
@@ -670,25 +665,32 @@ impl SceneRenderer {
         anim_elapsed_ms: f64,
         _frame_number: u64,
     ) {
-        let view_proj = build_view_projection(camera);
+        let view_proj = build_view_projection(camera, self.scene_width, self.scene_height);
         self.queue.write_buffer(
             &self.scene_uniform_buffer,
             0,
             bytemuck::bytes_of(&SceneUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
-                affine_params: [AFFINE_BLEND, SCENE_WIDTH as f32, SCENE_HEIGHT as f32, 0.0],
-                snap_params: [SNAP_WIDTH, SNAP_HEIGHT, 0.0, 0.0],
+                affine_params: [AFFINE_BLEND, self.scene_width as f32, self.scene_height as f32, 0.0],
+                snap_params: [self.scene_width as f32 / 2.0, self.scene_height as f32 / 2.0, 0.0, 0.0],
             }),
         );
         self.queue.write_buffer(
             &self.ntsc_encode_uniform_buffer,
             0,
-            bytemuck::bytes_of(&build_encode_uniforms(anim_elapsed_ms)),
+            bytemuck::bytes_of(&build_encode_uniforms(
+                self.scene_width,
+                self.scene_height,
+                anim_elapsed_ms,
+            )),
         );
         self.queue.write_buffer(
             &self.ntsc_decode_uniform_buffer,
             0,
-            bytemuck::bytes_of(&build_decode_uniforms()),
+            bytemuck::bytes_of(&build_decode_uniforms(
+                self.scene_width * 4,
+                self.scene_height,
+            )),
         );
 
         let sprite_vertices = build_sprite_vertices(
@@ -827,6 +829,20 @@ impl SceneRenderer {
         }
     }
 
+    pub fn calculate_scene_width(window_width: u32, window_height: u32) -> u32 {
+        if window_width == 0 || window_height == 0 {
+            return SCENE_WIDTH;
+        }
+
+        ((window_width as f32 / window_height as f32) * SCENE_HEIGHT as f32)
+            .round()
+            .max(1.0) as u32
+    }
+
+    pub fn scene_size(&self) -> (u32, u32) {
+        (self.scene_width, self.scene_height)
+    }
+
     fn ensure_sprite_capacity(&mut self, required_vertices: usize) {
         if required_vertices <= self.sprite_vertex_capacity {
             return;
@@ -846,8 +862,8 @@ fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::
     })
 }
 
-fn build_view_projection(camera: &RenderCamera) -> Mat4 {
-    let aspect = SCENE_WIDTH as f32 / SCENE_HEIGHT as f32;
+fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: u32) -> Mat4 {
+    let aspect = scene_width as f32 / scene_height as f32;
     let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
     // plane_len is tan(half_hfov), convert to vfov for perspective_lh
     let half_hfov = plane_len.atan();
@@ -861,13 +877,13 @@ fn build_view_projection(camera: &RenderCamera) -> Mat4 {
     projection * view
 }
 
-fn build_encode_uniforms(anim_elapsed_ms: f64) -> NtscEncodeUniforms {
+fn build_encode_uniforms(scene_width: u32, scene_height: u32, anim_elapsed_ms: f64) -> NtscEncodeUniforms {
     let elapsed_seconds = (anim_elapsed_ms * 0.001) as f32;
     let frame_phase = (elapsed_seconds * NTSC_PHASE_FLIP_HZ).floor().rem_euclid(2.0);
 
     NtscEncodeUniforms {
-        source_size: [SCENE_WIDTH as f32, SCENE_HEIGHT as f32],
-        output_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+        source_size: [scene_width as f32, scene_height as f32],
+        output_size: [(scene_width * 4) as f32, scene_height as f32],
         frame_phase,
         chroma_mod_freq: CHROMA_MOD_FREQ,
         _pad0: [0.0; 2],
@@ -877,9 +893,9 @@ fn build_encode_uniforms(anim_elapsed_ms: f64) -> NtscEncodeUniforms {
     }
 }
 
-fn build_decode_uniforms() -> NtscDecodeUniforms {
+fn build_decode_uniforms(composite_width: u32, composite_height: u32) -> NtscDecodeUniforms {
     NtscDecodeUniforms {
-        source_size: [COMPOSITE_WIDTH as f32, COMPOSITE_HEIGHT as f32],
+        source_size: [composite_width as f32, composite_height as f32],
         gamma_exp: 2.5 / 2.0,
         _pad0: 0.0,
     }

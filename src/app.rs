@@ -29,6 +29,7 @@ struct WindowState {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     renderer: SceneRenderer,
+    texture_manager: TextureManager,
 }
 
 pub struct App {
@@ -187,8 +188,8 @@ impl App {
         let (vx, vy, vw, vh) = SceneRenderer::calculate_aspect_preserving_viewport(
             state.surface_config.width,
             state.surface_config.height,
-            SCENE_WIDTH,
-            SCENE_HEIGHT,
+            state.renderer.scene_size().0,
+            state.renderer.scene_size().1,
         );
 
         state
@@ -212,6 +213,16 @@ impl App {
             if let Some(state) = &mut self.state {
                 state.surface_config.width = new_size.width;
                 state.surface_config.height = new_size.height;
+                let scene_width = SceneRenderer::calculate_scene_width(new_size.width, new_size.height);
+                state.renderer = SceneRenderer::new(
+                    state.renderer.device.clone(),
+                    state.renderer.queue.clone(),
+                    &self.server.map,
+                    &state.texture_manager,
+                    state.surface_config.format,
+                    scene_width,
+                    SCENE_HEIGHT,
+                );
                 state
                     .surface
                     .configure(&state.renderer.device, &state.surface_config);
@@ -225,7 +236,7 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("cpu-game")
             .with_inner_size(winit::dpi::PhysicalSize::new(SCENE_WIDTH, SCENE_HEIGHT))
-            .with_resizable(false);
+            .with_resizable(true);
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -264,12 +275,16 @@ impl ApplicationHandler for App {
             .texture_manager
             .take()
             .expect("texture manager should only be consumed once");
+        let window_size = window.inner_size();
+        let scene_width = SceneRenderer::calculate_scene_width(window_size.width, window_size.height);
         let renderer = SceneRenderer::new(
             device.clone(),
             queue.clone(),
             &self.server.map,
             &texture_manager,
             surface_format,
+            scene_width,
+            SCENE_HEIGHT,
         );
 
         let surface_config = wgpu::SurfaceConfiguration {
@@ -291,6 +306,7 @@ impl ApplicationHandler for App {
             surface,
             surface_config,
             renderer,
+            texture_manager,
         });
     }
 
