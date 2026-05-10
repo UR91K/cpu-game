@@ -866,9 +866,7 @@ fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: 
     let aspect = scene_width as f32 / scene_height as f32;
     let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
     // plane_len is tan(half_hfov), convert to vfov for perspective_lh
-    let half_hfov = plane_len.atan();
-    let half_vfov = (half_hfov / aspect).atan();
-    let vfov = 2.0 * half_vfov;
+    let vfov = 2.0 * (plane_len / aspect).atan();
 
     let eye = Vec3::new(camera.x as f32, CAMERA_HEIGHT, camera.y as f32);
     let forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
@@ -1243,7 +1241,7 @@ fn push_quad(
 ) {
     // Subdivide each quad into a 2x2 grid (4 sub-quads = 8 triangles) via bilinear interpolation.
     // Corner parameterization: p0=(s=0,t=0), p1=(s=1,t=0), p2=(s=1,t=1), p3=(s=0,t=1)
-    const DIVS: usize = 1;
+    const DIVS: usize = 2;
 
     let (left_u, right_u) = if flip_u {
         (rect.u1, rect.u0)
