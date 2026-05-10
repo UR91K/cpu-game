@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-mono, monospace); background: var(--color-background-tertiary); color: var(--color-text-primary); }
+
+#app { display: flex; flex-direction: column; height: 100vh; min-height: 600px; }
+
+#toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--color-background-primary);
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  flex-wrap: wrap;
+}
+#toolbar h1 { font-size: 13px; font-weight: 500; margin-right: 8px; letter-spacing: 0.05em; color: var(--color-text-secondary); }
+
+.tb-group { display: flex; align-items: center; gap: 4px; }
+.tb-sep { width: 0.5px; height: 20px; background: var(--color-border-tertiary); margin: 0 4px; }
+
+button {
+  font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 500;
+  padding: 4px 10px; border-radius: var(--border-radius-md);
+  border: 0.5px solid var(--color-border-secondary);
+  background: var(--color-background-primary); color: var(--color-text-primary);
+  cursor: pointer; white-space: nowrap;
+}
+button:hover { background: var(--color-background-secondary); }
+button.active { background: var(--color-background-info); color: var(--color-text-info); border-color: var(--color-border-info); }
+
+label { font-size: 11px; color: var(--color-text-secondary); }
+input[type=number] {
+  font-family: var(--font-mono, monospace); font-size: 11px;
+  width: 48px; padding: 3px 6px; border-radius: var(--border-radius-md);
+  border: 0.5px solid var(--color-border-secondary);
+  background: var(--color-background-primary); color: var(--color-text-primary);
+}
+
+#main { display: flex; flex: 1; overflow: hidden; }
+
+#sidebar {
+  width: 180px; min-width: 180px;
+  background: var(--color-background-primary);
+  border-right: 0.5px solid var(--color-border-tertiary);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.sidebar-section { padding: 10px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.sidebar-section h2 { font-size: 10px; font-weight: 500; letter-spacing: 0.08em; color: var(--color-text-tertiary); text-transform: uppercase; margin-bottom: 8px; }
+
+.palette-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+  border-radius: var(--border-radius-md); cursor: pointer; font-size: 11px;
+}
+.palette-row:hover { background: var(--color-background-secondary); }
+.palette-row.selected { background: var(--color-background-info); color: var(--color-text-info); }
+.swatch { width: 16px; height: 16px; border-radius: 3px; border: 0.5px solid rgba(0,0,0,0.15); flex-shrink: 0; }
+
+#tile-info {
+  padding: 10px; font-size: 11px; color: var(--color-text-secondary);
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+#tile-info table { width: 100%; }
+#tile-info td { padding: 2px 0; }
+#tile-info td:first-child { color: var(--color-text-tertiary); padding-right: 6px; }
+#tile-info td:last-child { font-weight: 500; color: var(--color-text-primary); }
+
+#canvas-wrap {
+  flex: 1; overflow: auto; background: var(--color-background-tertiary);
+  display: flex; align-items: flex-start; justify-content: flex-start;
+  padding: 16px;
+}
+canvas { image-rendering: pixelated; cursor: crosshair; display: block; }
+
+#statusbar {
+  height: 24px; display: flex; align-items: center; gap: 16px; padding: 0 12px;
+  background: var(--color-background-primary); border-top: 0.5px solid var(--color-border-tertiary);
+  font-size: 11px; color: var(--color-text-tertiary);
+}
+#statusbar span { font-weight: 500; color: var(--color-text-secondary); }
+
+.mode-btn { min-width: 60px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <h1>AMAP EDITOR</h1>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <label>W</label><input type="number" id="inp-w" value="32" min="4" max="128">
+      <label>H</label><input type="number" id="inp-h" value="24" min="4" max="128">
+      <button id="btn-new">new map</button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <label>zoom</label>
+      <button id="btn-zoom-out">−</button>
+      <span id="zoom-label" style="font-size:11px;min-width:28px;text-align:center">16</span>
+      <button id="btn-zoom-in">+</button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button class="mode-btn active" id="btn-paint" data-mode="paint">paint</button>
+      <button class="mode-btn" id="btn-erase" data-mode="erase">erase</button>
+      <button class="mode-btn" id="btn-fill" data-mode="fill">fill</button>
+      <button class="mode-btn" id="btn-pick" data-mode="pick">pick</button>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-group">
+      <button id="btn-save">↓ save .amap</button>
+      <button id="btn-load">↑ load .amap</button>
+      <input type="file" id="file-input" accept=".amap" style="display:none">
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="sidebar">
+      <div class="sidebar-section">
+        <h2>channel</h2>
+        <div class="tb-group" style="flex-direction:column;gap:3px;align-items:stretch">
+          <button class="active" id="ch-wall" data-ch="wall" style="text-align:left">R · wall type</button>
+          <button id="ch-floor" data-ch="floor" style="text-align:left">G · floor tex</button>
+          <button id="ch-height" data-ch="height" style="text-align:left">B · wall height</button>
+          <button id="ch-special" data-ch="special" style="text-align:left">A · special</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section" id="palette-section">
+        <h2 id="palette-title">wall type</h2>
+        <div id="palette"></div>
+      </div>
+
+      <div id="tile-info">
+        <table>
+          <tr><td>pos</td><td id="ti-pos">—</td></tr>
+          <tr><td>wall</td><td id="ti-wall">—</td></tr>
+          <tr><td>floor</td><td id="ti-floor">—</td></tr>
+          <tr><td>height</td><td id="ti-height">—</td></tr>
+          <tr><td>special</td><td id="ti-special">—</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+  <div id="statusbar">
+    mode: <span id="st-mode">paint</span> &nbsp;|&nbsp;
+    channel: <span id="st-ch">wall type</span> &nbsp;|&nbsp;
+    brush: <span id="st-brush">0</span>
+  </div>
+</div>
+
+<script>
+const MAGIC = [0x41, 0x4D, 0x41, 0x50];
+const VERSION = 1;
+const BYTES_PER_TILE = 8;
+const HEADER_SIZE = 32;
+
+const CHANNELS = {
+  wall:    { idx: 0, label: 'wall type' },
+  floor:   { idx: 1, label: 'floor tex' },
+  height:  { idx: 2, label: 'wall height' },
+  special: { idx: 6, label: 'special' },
+};
+
+const PALETTES = {
+  wall: [
+    { val: 0, label: 'floor',    color: '#e8e4d8' },
+    { val: 1, label: 'wall 1',   color: '#2c2c2a' },
+    { val: 2, label: 'wall 2',   color: '#185fa5' },
+    { val: 3, label: 'wall 3',   color: '#3b6d11' },
+    { val: 4, label: 'wall 4',   color: '#854f0b' },
+    { val: 5, label: 'wall 5',   color: '#993c1d' },
+    { val: 255, label: 'void',   color: '#111' },
+  ],
+  floor: [
+    { val: 0, label: 'smooth',     color: '#e8e4d8' },
+    { val: 1, label: 'milk veins', color: '#d4a0d0' },
+    { val: 2, label: 'stone',      color: '#b4b2a9' },
+    { val: 3, label: 'mossy',      color: '#639922' },
+    { val: 4, label: 'wood',       color: '#ba7517' },
+  ],
+  height: [
+    { val: 0, label: 'default',  color: '#e8e4d8' },
+    { val: 1, label: 'low (1)',  color: '#b5d4f4' },
+    { val: 2, label: 'mid (2)',  color: '#378add' },
+    { val: 3, label: 'tall (3)', color: '#185fa5' },
+    { val: 4, label: 'high (4)', color: '#0c447c' },
+    { val: 8, label: 'max (8)',  color: '#042c53' },
+  ],
+  special: [
+    { val: 0,   label: 'none',       color: '#e8e4d8' },
+    { val: 1,   label: 'spawn',      color: '#fac775' },
+    { val: 2,   label: 'teleport A', color: '#af9ec2' },
+    { val: 3,   label: 'teleport B', color: '#7f77dd' },
+    { val: 4,   label: 'trigger',    color: '#f09595' },
+    { val: 255, label: 'secret',     color: '#3b6d11' },
+  ],
+};
+
+let mapW = 32, mapH = 24;
+let tiles = null;
+let tileSize = 16;
+let mode = 'paint';
+let channel = 'wall';
+let brushVal = 1;
+let isPainting = false;
+let lastPaintedTile = null;
+let hoverX = -1, hoverY = -1;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function makeTiles(w, h) {
+  return new Uint8Array(w * h * BYTES_PER_TILE);
+}
+
+function tileBase(x, y) { return (y * mapW + x) * BYTES_PER_TILE; }
+
+function getTile(x, y, ch) {
+  return tiles[tileBase(x, y) + CHANNELS[ch].idx];
+}
+
+function setTile(x, y, ch, val) {
+  tiles[tileBase(x, y) + CHANNELS[ch].idx] = val;
+}
+
+function wallColor(v) {
+  const entry = PALETTES.wall.find(p => p.val === v);
+  return entry ? entry.color : '#888';
+}
+
+function floorColor(v) {
+  const entry = PALETTES.floor.find(p => p.val === v);
+  return entry ? entry.color : '#e8e4d8';
+}
+
+function render() {
+  canvas.width  = mapW * tileSize;
+  canvas.height = mapH * tileSize;
+
+  for (let y = 0; y < mapH; y++) {
+    for (let x = 0; x < mapW; x++) {
+      const wall  = getTile(x, y, 'wall');
+      const floor = getTile(x, y, 'floor');
+      const height = getTile(x, y, 'height');
+      const special = getTile(x, y, 'special');
+
+      let baseColor = wall > 0 ? wallColor(wall) : floorColor(floor);
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+
+      if (wall > 0 && height > 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(x * tileSize, y * tileSize, tileSize, Math.min(height * 2, tileSize));
+      }
+
+      if (special > 0) {
+        const sp = PALETTES.special.find(p => p.val === special);
+        ctx.fillStyle = sp ? sp.color + '99' : '#ff000066';
+        ctx.fillRect(x * tileSize + tileSize*0.25, y * tileSize + tileSize*0.25, tileSize*0.5, tileSize*0.5);
+      }
+
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x * tileSize + 0.25, y * tileSize + 0.25, tileSize - 0.5, tileSize - 0.5);
+    }
+  }
+
+  if (hoverX >= 0 && hoverY >= 0) {
+    ctx.strokeStyle = 'rgba(255,200,0,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(hoverX * tileSize + 0.75, hoverY * tileSize + 0.75, tileSize - 1.5, tileSize - 1.5);
+  }
+}
+
+function newMap(w, h) {
+  mapW = w; mapH = h;
+  tiles = makeTiles(w, h);
+  render();
+}
+
+function encodeBinary() {
+  const tileBytes = mapW * mapH * BYTES_PER_TILE;
+  const buf = new ArrayBuffer(HEADER_SIZE + tileBytes + 2);
+  const v = new DataView(buf);
+  MAGIC.forEach((b, i) => v.setUint8(i, b));
+  v.setUint16(4, VERSION, true);
+  v.setUint16(6, mapW, true);
+  v.setUint16(8, mapH, true);
+  v.setUint16(10, tileSize, true);
+  v.setUint32(12, 0, true);
+  v.setUint32(16, HEADER_SIZE + tileBytes, true);
+  v.setUint32(20, 0, true);
+  for (let i = 0; i < 8; i++) v.setUint8(24 + i, 0);
+  const dst = new Uint8Array(buf, HEADER_SIZE, tileBytes);
+  dst.set(tiles.subarray(0, tileBytes));
+  v.setUint16(HEADER_SIZE + tileBytes, 0, true);
+  return buf;
+}
+
+function decodeBinary(buf) {
+  const v = new DataView(buf);
+  const magic = [v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3)];
+  if (magic.join() !== MAGIC.join()) { alert('Not a valid .amap file'); return; }
+  mapW = v.getUint16(6, true);
+  mapH = v.getUint16(8, true);
+  tileSize = Math.max(8, Math.min(32, v.getUint16(10, true)));
+  const tileBytes = mapW * mapH * BYTES_PER_TILE;
+  tiles = makeTiles(mapW, mapH);
+  const src = new Uint8Array(buf, HEADER_SIZE, tileBytes);
+  tiles.set(src);
+  updateZoomLabel();
+  render();
+}
+
+function pixelToTile(px, py) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = Math.floor((px - rect.left) * scaleX / tileSize);
+  const y = Math.floor((py - rect.top)  * scaleY / tileSize);
+  return { x, y };
+}
+
+function inBounds(x, y) { return x >= 0 && y >= 0 && x < mapW && y < mapH; }
+
+function paintTile(x, y) {
+  if (!inBounds(x, y)) return;
+  if (mode === 'erase') {
+    setTile(x, y, channel, 0);
+  } else if (mode === 'paint') {
+    setTile(x, y, channel, brushVal);
+  }
+}
+
+function floodFill(sx, sy, targetVal, fillVal) {
+  if (targetVal === fillVal) return;
+  const stack = [[sx, sy]];
+  const visited = new Uint8Array(mapW * mapH);
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (!inBounds(x, y)) continue;
+    if (visited[y * mapW + x]) continue;
+    if (getTile(x, y, channel) !== targetVal) continue;
+    visited[y * mapW + x] = 1;
+    setTile(x, y, channel, fillVal);
+    stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+}
+
+function updateTileInfo(x, y) {
+  if (!inBounds(x, y)) { document.getElementById('ti-pos').textContent = '—'; return; }
+  document.getElementById('ti-pos').textContent = `${x}, ${y}`;
+  document.getElementById('ti-wall').textContent = getTile(x, y, 'wall');
+  document.getElementById('ti-floor').textContent = getTile(x, y, 'floor');
+  document.getElementById('ti-height').textContent = getTile(x, y, 'height');
+  document.getElementById('ti-special').textContent = getTile(x, y, 'special');
+}
+
+canvas.addEventListener('mousemove', e => {
+  const {x, y} = pixelToTile(e.clientX, e.clientY);
+  hoverX = x; hoverY = y;
+  updateTileInfo(x, y);
+  if (isPainting && (x !== lastPaintedTile?.x || y !== lastPaintedTile?.y)) {
+    paintTile(x, y);
+    lastPaintedTile = {x, y};
+  }
+  render();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  hoverX = -1; hoverY = -1;
+  render();
+});
+
+canvas.addEventListener('mousedown', e => {
+  e.preventDefault();
+  const {x, y} = pixelToTile(e.clientX, e.clientY);
+  if (!inBounds(x, y)) return;
+  if (mode === 'pick') {
+    brushVal = getTile(x, y, channel);
+    selectBrushInPalette(brushVal);
+    return;
+  }
+  if (mode === 'fill') {
+    const target = getTile(x, y, channel);
+    floodFill(x, y, target, brushVal);
+    render(); return;
+  }
+  isPainting = true;
+  paintTile(x, y);
+  lastPaintedTile = {x, y};
+  render();
+});
+
+window.addEventListener('mouseup', () => { isPainting = false; lastPaintedTile = null; });
+
+function buildPalette() {
+  const pal = document.getElementById('palette');
+  pal.innerHTML = '';
+  document.getElementById('palette-title').textContent = CHANNELS[channel].label;
+  PALETTES[channel].forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'palette-row' + (entry.val === brushVal ? ' selected' : '');
+    row.innerHTML = `<div class="swatch" style="background:${entry.color}"></div><span>${entry.label} (${entry.val})</span>`;
+    row.addEventListener('click', () => {
+      brushVal = entry.val;
+      document.getElementById('st-brush').textContent = entry.val;
+      buildPalette();
+    });
+    pal.appendChild(row);
+  });
+}
+
+function selectBrushInPalette(val) {
+  brushVal = val;
+  document.getElementById('st-brush').textContent = val;
+  buildPalette();
+}
+
+document.querySelectorAll('[data-mode]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    mode = btn.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('st-mode').textContent = mode;
+  });
+});
+
+document.querySelectorAll('[data-ch]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    channel = btn.dataset.ch;
+    document.querySelectorAll('[data-ch]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('st-ch').textContent = CHANNELS[channel].label;
+    brushVal = PALETTES[channel][1]?.val ?? 0;
+    buildPalette();
+  });
+});
+
+document.getElementById('btn-new').addEventListener('click', () => {
+  const w = parseInt(document.getElementById('inp-w').value) || 32;
+  const h = parseInt(document.getElementById('inp-h').value) || 24;
+  newMap(Math.min(128, Math.max(4, w)), Math.min(128, Math.max(4, h)));
+});
+
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  tileSize = Math.min(48, tileSize * 2);
+  updateZoomLabel(); render();
+});
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  tileSize = Math.max(4, Math.floor(tileSize / 2));
+  updateZoomLabel(); render();
+});
+function updateZoomLabel() {
+  document.getElementById('zoom-label').textContent = tileSize;
+}
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  const buf = encodeBinary();
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'map.amap';
+  a.click();
+});
+
+document.getElementById('btn-load').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => decodeBinary(ev.target.result);
+  reader.readAsArrayBuffer(file);
+  e.target.value = '';
+});
+
+newMap(32, 24);
+buildPalette();
+</script>
+</body>
+</html>
