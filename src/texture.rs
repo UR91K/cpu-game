@@ -17,6 +17,16 @@ pub enum FloorTexture {
     MilkVeins,
 }
 
+impl FloorTexture {
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Self::Smooth),
+            1 => Some(Self::MilkVeins),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ItemTexture {
     Health,
