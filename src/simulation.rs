@@ -6,7 +6,7 @@ use crate::model::{
 };
 use crate::texture::{visual_definition, VisualId};
 
-pub const PLAYER_RADIUS: f64 = 0.1;
+pub const PLAYER_RADIUS: f64 = 0.2;
 pub const TICK_RATE: u64 = 64;
 pub const TICK_DT: f64 = 1.0 / TICK_RATE as f64;
 pub const MOVE_SPEED: f64 = 40.0;
