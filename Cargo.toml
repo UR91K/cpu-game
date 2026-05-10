@@ -12,10 +12,6 @@ wgpu = "27"
 pollster = "0.4"
 bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
-librashader = { version = "0.9", features = ["runtime-wgpu", "stable"] }
-engine-core = { path = "crates/engine-core" }
-shader_test = { package = "cpu-presenter", path = "crates/cpu-presenter" }
-# shader_test = { package = "presenter", path = "crates/presenter" }
 
 [profile.release]
 lto = true
