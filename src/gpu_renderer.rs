@@ -23,7 +23,7 @@ const CAMERA_HEIGHT: f32 = 0.5;
 const NEAR_PLANE: f32 = 0.05;
 const FAR_PLANE: f32 = 128.0;
 const AFFINE_BLEND: f32 = 0.4;
-const SKY_COLOR: &str = "#8489f0"; // Light blue
+const SKY_COLOR: &str = "#575ff8"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
     let [r, g, b] = [1, 3, 5].map(|i| {
