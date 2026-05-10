@@ -31,16 +31,20 @@ pub struct RenderBillboard {
     pub animation: AnimationStyle,
 }
 
-pub fn assemble_scene(state: &GameState, viewer: PlayerId) -> Option<RenderScene> {
+pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -> Option<RenderScene> {
     let player = state.players.get(&viewer)?;
     let actor = state.objects.get(&player.controlled_object)?;
+    // Derive camera plane from dir rotated 90° CW, scaled by fov_plane_len.
+    // plane_len = tan(half_hfov), so fov_plane_len controls horizontal FOV.
+    let plane_x = player.dir_y * fov_plane_len;
+    let plane_y = -player.dir_x * fov_plane_len;
     let camera = RenderCamera {
         x: actor.x,
         y: actor.y,
         dir_x: player.dir_x,
         dir_y: player.dir_y,
-        plane_x: player.plane_x,
-        plane_y: player.plane_y,
+        plane_x,
+        plane_y,
     };
 
     let billboards = state

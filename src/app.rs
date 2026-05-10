@@ -41,6 +41,7 @@ pub struct App {
     last_frame: Instant,
     frame_duration: Duration,
     mouse_sensitivity: f64,
+    fov_plane_len: f64,
     texture_manager: Option<TextureManager>,
     current_tick: u64,
     anim_elapsed_ms: f64,
@@ -65,6 +66,7 @@ impl App {
             last_frame: Instant::now(),
             frame_duration: Duration::from_nanos(1_000_000_000 / TARGET_FPS),
             mouse_sensitivity: 0.003,
+            fov_plane_len: 0.85,
             texture_manager: Some(texture_manager),
             current_tick: 0,
             anim_elapsed_ms: 0.0,
@@ -156,7 +158,7 @@ impl App {
             return;
         };
 
-        let scene = match render_assembly::assemble_scene(&self.server.state, self.human_id) {
+        let scene = match render_assembly::assemble_scene(&self.server.state, self.human_id, self.fov_plane_len) {
             Some(scene) => scene,
             None => return,
         };

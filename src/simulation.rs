@@ -24,8 +24,6 @@ pub struct PlayerState {
     pub controlled_object: ObjectId,
     pub dir_x: f64,
     pub dir_y: f64,
-    pub plane_x: f64,
-    pub plane_y: f64,
 }
 
 impl PlayerState {
@@ -34,8 +32,6 @@ impl PlayerState {
             controlled_object,
             dir_x: -1.0,
             dir_y: 0.0,
-            plane_x: 0.0,
-            plane_y: 0.66,
         }
     }
 }
@@ -190,16 +186,14 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         let old_dir_x = player.dir_x;
         player.dir_x = old_dir_x * cos - player.dir_y * sin;
         player.dir_y = old_dir_x * sin + player.dir_y * cos;
-        let old_plane_x = player.plane_x;
-        player.plane_x = old_plane_x * cos - player.plane_y * sin;
-        player.plane_y = old_plane_x * sin + player.plane_y * cos;
     }
 
     let controlled_object = player.controlled_object;
     let dir_x = player.dir_x;
     let dir_y = player.dir_y;
-    let plane_x = player.plane_x;
-    let plane_y = player.plane_y;
+    // right vector: dir rotated 90° CW, independent of FOV
+    let right_x = dir_y;
+    let right_y = -dir_x;
 
     let mut move_dir_x = 0.0f64;
     let mut move_dir_y = 0.0f64;
@@ -212,12 +206,12 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         move_dir_y -= dir_y;
     }
     if input.strafe_left {
-        move_dir_x -= plane_x;
-        move_dir_y -= plane_y;
+        move_dir_x -= right_x;
+        move_dir_y -= right_y;
     }
     if input.strafe_right {
-        move_dir_x += plane_x;
-        move_dir_y += plane_y;
+        move_dir_x += right_x;
+        move_dir_y += right_y;
     }
 
     // normalize movement
