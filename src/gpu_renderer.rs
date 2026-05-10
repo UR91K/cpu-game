@@ -1214,7 +1214,7 @@ fn push_quad(
 ) {
     // Subdivide each quad into a 2x2 grid (4 sub-quads = 8 triangles) via bilinear interpolation.
     // Corner parameterization: p0=(s=0,t=0), p1=(s=1,t=0), p2=(s=1,t=1), p3=(s=0,t=1)
-    const DIVS: usize = 1;
+    const DIVS: usize = 4;
 
     let (left_u, right_u) = if flip_u {
         (rect.u1, rect.u0)
@@ -1245,14 +1245,14 @@ fn push_quad(
             let s1 = (si + 1) as f32 / DIVS as f32;
             let t0 = ti as f32 / DIVS as f32;
             let t1 = (ti + 1) as f32 / DIVS as f32;
-    let base = vertices.len() as u32;
-    vertices.extend_from_slice(&[
+            let base = vertices.len() as u32;
+            vertices.extend_from_slice(&[
                 point_at(s0, t0),
                 point_at(s1, t0),
                 point_at(s1, t1),
                 point_at(s0, t1),
-    ]);
-    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            ]);
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
     }
 }
