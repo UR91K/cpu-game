@@ -344,6 +344,18 @@ impl ApplicationHandler for App {
                         self.pending_fire = true;
                     }
 
+                    if code == KeyCode::F11 && event.state == ElementState::Pressed {
+                        if let Some(state) = &self.state {
+                            let is_fullscreen = state.window.fullscreen().is_some();
+                            state.window.set_fullscreen(if is_fullscreen {
+                                None
+                            } else {
+                                Some(winit::window::Fullscreen::Borderless(None))
+                            });
+                        }
+                        return;
+                    }
+
                     match event.state {
                         ElementState::Pressed => {
                             self.keys.insert(code);
