@@ -44,7 +44,6 @@ pub struct NtscDecodeUniforms {
     _pad0: f32,
 }
 
-
 pub fn build_encode_uniforms(
     scene_width: u32,
     scene_height: u32,

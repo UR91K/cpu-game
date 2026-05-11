@@ -1,13 +1,11 @@
-use std::collections::HashMap;
 use glam::Vec3;
+use std::collections::HashMap;
 
 use crate::model::Level;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
 use crate::renderer::animation::select_sprite_uv_rect;
 use crate::renderer::uniforms::SceneVertex;
-use crate::texture::{
-    TextureKey, TextureManager
-};
+use crate::texture::{TextureKey, TextureManager};
 
 // TODO: read the per tile wall_height from the level data instead of hardcoding it here.
 pub const WALL_HEIGHT: f32 = 1.0;
@@ -31,7 +29,6 @@ impl SceneVertex {
         }
     }
 }
-
 
 pub fn build_static_mesh(
     level: &Level,
@@ -138,7 +135,6 @@ pub fn build_static_mesh(
     (vertices, indices)
 }
 
-
 pub fn build_sprite_vertices(
     camera: &RenderCamera,
     billboards: &[RenderBillboard],
@@ -204,7 +200,6 @@ pub fn build_sprite_vertices(
     vertices
 }
 
-
 pub fn push_quad(
     vertices: &mut Vec<SceneVertex>,
     indices: &mut Vec<u32>,
@@ -263,7 +258,6 @@ pub fn push_quad(
     }
 }
 
-
 pub fn inset_atlas_rect_half_texel(rect: AtlasRect) -> AtlasRect {
     let width_scale = (rect.u1 - rect.u0) / rect.pixel_width.max(1) as f32;
     let height_scale = (rect.v1 - rect.v0) / rect.pixel_height.max(1) as f32;
@@ -279,7 +273,6 @@ pub fn inset_atlas_rect_half_texel(rect: AtlasRect) -> AtlasRect {
         pixel_height: rect.pixel_height,
     }
 }
-
 
 pub fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {

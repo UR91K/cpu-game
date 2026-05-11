@@ -5,12 +5,12 @@ use winit::event_loop::EventLoop;
 
 mod app;
 mod font;
-mod renderer;
 mod input;
 mod level;
 mod model;
 mod net;
 mod render_assembly;
+mod renderer;
 mod simulation;
 mod texture;
 

@@ -1,18 +1,19 @@
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use glam::{Mat4, Vec3};
-use wgpu::util::DeviceExt;
 use crate::model::Level;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
 use crate::renderer::AFFINE_BLEND;
 use crate::renderer::atlas::build_texture_atlas;
-use crate::renderer::mesh::{AtlasRect, build_sprite_vertices, build_static_mesh, create_sprite_buffer};
-use crate::renderer::uniforms::{SceneUniforms, SceneVertex, build_decode_uniforms, build_encode_uniforms};
-use crate::texture::{
-    TextureKey, TextureManager
+use crate::renderer::mesh::{
+    AtlasRect, build_sprite_vertices, build_static_mesh, create_sprite_buffer,
 };
+use crate::renderer::uniforms::{
+    SceneUniforms, SceneVertex, build_decode_uniforms, build_encode_uniforms,
+};
+use crate::texture::{TextureKey, TextureManager};
+use glam::{Mat4, Vec3};
+use wgpu::util::DeviceExt;
 
 pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 480;

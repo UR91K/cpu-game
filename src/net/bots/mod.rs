@@ -1,8 +1,6 @@
-
 use super::Controller;
 use crate::model::{Level, Waypoint};
 use rand::seq::IndexedRandom;
-
 
 pub mod wandering;
 pub mod waypoint;

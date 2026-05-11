@@ -1,8 +1,6 @@
 use crate::render_assembly::RenderBillboard;
 use crate::renderer::mesh::AtlasRect;
-use crate::texture::{
-    AnimationDescriptor, AnimationPlayback, animation_descriptor,
-};
+use crate::texture::{AnimationDescriptor, AnimationPlayback, animation_descriptor};
 
 pub const WALK_PING_PONG: [u32; 4] = [0, 1, 2, 1];
 
