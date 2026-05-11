@@ -23,27 +23,23 @@ pub enum VisibleSide {
     Right,
 }
 
-pub fn get_visible_side(entity_movement_angle: f64, camera_facing_angle: f64) -> VisibleSide {
-    const SIDE_HALF_ANGLE: f64 = 0.785398;
-
-    let mut rel = entity_movement_angle - camera_facing_angle;
-
-    rel = (rel + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-
-    let abs_rel = rel.abs();
-
-    if abs_rel < SIDE_HALF_ANGLE {
-        VisibleSide::Back
-    } else if abs_rel > std::f64::consts::PI - SIDE_HALF_ANGLE {
-        VisibleSide::Front
-    } else if abs_rel > std::f64::consts::FRAC_PI_2 - SIDE_HALF_ANGLE
-           && abs_rel < std::f64::consts::FRAC_PI_2 + SIDE_HALF_ANGLE
-    {
-        if rel > 0.0 { VisibleSide::Left } else { VisibleSide::Right }
-    } else if abs_rel < std::f64::consts::FRAC_PI_2 {
-        VisibleSide::Back
+pub fn get_visible_side(entity_dir: (f64, f64), camera_dir: (f64, f64)) -> VisibleSide {
+    // Use dot/cross products to avoid atan2.
+    // dot = |e||c|cos(rel), cross z = e×c = -|e||c|sin(rel), where rel = entity_angle - camera_angle.
+    let dot = entity_dir.0 * camera_dir.0 + entity_dir.1 * camera_dir.1;
+    let cross = entity_dir.0 * camera_dir.1 - entity_dir.1 * camera_dir.0;
+    let len_sq = (entity_dir.0 * entity_dir.0 + entity_dir.1 * entity_dir.1)
+        * (camera_dir.0 * camera_dir.0 + camera_dir.1 * camera_dir.1);
+    if len_sq < 1e-20 {
+        return VisibleSide::Front;
+    }
+    // |cos(rel)| >= cos(45°)=1/√2  ↔  dot² >= 0.5*len_sq
+    if dot * dot >= 0.5 * len_sq {
+        if dot >= 0.0 { VisibleSide::Back } else { VisibleSide::Front }
+    } else if cross < 0.0 {
+        VisibleSide::Left
     } else {
-        VisibleSide::Front
+        VisibleSide::Right
     }
 }
 
@@ -296,7 +292,7 @@ pub fn render(
     }
 
     // draw billboards
-    let camera_facing_angle = camera.dir_y.atan2(camera.dir_x);
+    let camera_dir = (camera.dir_x, camera.dir_y);
 
     for billboard in billboards {
         let sprite_x = billboard.x - camera.x;
@@ -351,8 +347,8 @@ pub fn render(
         let side_row = if let Some(animation) = animation.filter(|_| animated) {
             if animation.directional_rows && matches!(billboard.facing_mode, FacingMode::Movement) {
                 side_to_row(get_visible_side(
-                    billboard.movement_angle,
-                    camera_facing_angle,
+                    billboard.facing_dir,
+                    camera_dir,
                 )) as usize
             } else {
                 animation_frame_row(animation, frame_step)

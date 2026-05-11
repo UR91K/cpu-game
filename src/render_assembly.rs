@@ -23,7 +23,7 @@ pub struct RenderBillboard {
     pub x: f64,
     pub y: f64,
     pub texture: TextureKey,
-    pub movement_angle: f64,
+    pub facing_dir: (f64, f64),
     pub is_moving: bool,
     pub width: f32,
     pub height: f32,
@@ -55,16 +55,16 @@ pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -
             let definition = visual_definition(render.visual);
             let speed_sq = object.vel_x * object.vel_x + object.vel_y * object.vel_y;
             let is_moving = speed_sq > 1e-6;
-            let movement_angle = if is_moving {
-                object.vel_y.atan2(object.vel_x)
+            let facing_dir = if is_moving {
+                (object.vel_x, object.vel_y)
             } else {
                 match object.kind {
                     ObjectKind::Actor { owner_player: Some(owner_player) } => state
                         .players
                         .get(&owner_player)
-                        .map(|owner| owner.dir_y.atan2(owner.dir_x))
-                        .unwrap_or(0.0),
-                    _ => 0.0,
+                        .map(|owner| (owner.dir_x, owner.dir_y))
+                        .unwrap_or((0.0, 0.0)),
+                    _ => (0.0, 0.0),
                 }
             };
 
@@ -72,7 +72,7 @@ pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -
                 x: object.x,
                 y: object.y,
                 texture: definition.texture,
-                movement_angle,
+                facing_dir,
                 is_moving,
                 width: render.width,
                 height: render.height,
