@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
 use crate::input::InputMessage;
-use crate::model::{
-    Map, ObjectId, ObjectKind, PickupKind, PlayerId, RenderBody, WorldObject,
-};
-use crate::texture::{visual_definition, VisualId};
+use crate::model::{ControllerId, Entity, EntityKind, Level, EntityId, PickupKind, RenderBody};
+use crate::texture::{VisualId, visual_definition};
 
 pub const PLAYER_RADIUS: f64 = 0.2;
 pub const TICK_RATE: u64 = 64;
@@ -20,16 +18,16 @@ const PROJECTILE_DAMAGE: u32 = 1;
 const EPSILON: f64 = 1e-6;
 
 #[derive(Clone, Debug)]
-pub struct PlayerState {
-    pub controlled_object: ObjectId,
+pub struct Player {
+    pub pawn_id: EntityId,
     pub dir_x: f64,
     pub dir_y: f64,
 }
 
-impl PlayerState {
-    pub fn new(controlled_object: ObjectId) -> Self {
+impl Player {
+    pub fn new(pawn_id: EntityId) -> Self {
         Self {
-            controlled_object,
+            pawn_id,
             dir_x: -1.0,
             dir_y: 0.0,
         }
@@ -38,52 +36,53 @@ impl PlayerState {
 
 #[derive(Clone, Debug)]
 pub struct GameState {
-    pub players: HashMap<PlayerId, PlayerState>,
-    pub objects: HashMap<ObjectId, WorldObject>,
+    pub players: HashMap<ControllerId, Player>,
+    pub entities: HashMap<EntityId, Entity>,
     pub tick: u64,
-    pub next_object_id: ObjectId,
-    
+    pub next_entity_id: EntityId,
 }
 
 impl GameState {
     pub fn new() -> Self {
         Self {
             players: HashMap::new(),
-            objects: HashMap::new(),
+            entities: HashMap::new(),
             tick: 0,
-            next_object_id: 1,
+            next_entity_id: 1,
         }
     }
 
-    pub fn allocate_object_id(&mut self) -> ObjectId {
-        let id = self.next_object_id;
-        self.next_object_id += 1;
+    pub fn allocate_entity_id(&mut self) -> EntityId {
+        let id = self.next_entity_id;
+        self.next_entity_id += 1;
         id
     }
 
-    pub fn spawn_actor(&mut self, x: f64, y: f64, owner_player: Option<PlayerId>) -> ObjectId {
-        let id = self.allocate_object_id();
-        self.objects.insert(
+    pub fn spawn_pawn(&mut self, x: f64, y: f64, owner_id: Option<ControllerId>) -> EntityId {
+        let id = self.allocate_entity_id();
+        self.entities.insert(
             id,
-            WorldObject {
+            Entity {
                 id,
                 x,
                 y,
                 vel_x: 0.0,
                 vel_y: 0.0,
                 radius: PLAYER_RADIUS,
-                render: Some(render_body(VisualId::PlayerActor)),
-                kind: ObjectKind::Actor { owner_player },
+                render: Some(render_body(VisualId::PlayerPawn)),
+                kind: EntityKind::Pawn {
+                    owner_id,
+                },
             },
         );
         id
     }
 
-    pub fn spawn_static_prop(&mut self, x: f64, y: f64) -> ObjectId {
-        let id = self.allocate_object_id();
-        self.objects.insert(
+    pub fn spawn_static_prop(&mut self, x: f64, y: f64) -> EntityId {
+        let id = self.allocate_entity_id();
+        self.entities.insert(
             id,
-            WorldObject {
+            Entity {
                 id,
                 x,
                 y,
@@ -91,7 +90,7 @@ impl GameState {
                 vel_y: 0.0,
                 radius: STATIC_PROP_RADIUS,
                 render: Some(render_body(VisualId::StaticProp)),
-                kind: ObjectKind::StaticProp {
+                kind: EntityKind::StaticProp {
                     blocks_movement: true,
                 },
             },
@@ -99,11 +98,11 @@ impl GameState {
         id
     }
 
-    pub fn spawn_pickup(&mut self, x: f64, y: f64, pickup_kind: PickupKind) -> ObjectId {
-        let id = self.allocate_object_id();
-        self.objects.insert(
+    pub fn spawn_pickup(&mut self, x: f64, y: f64, pickup_kind: PickupKind) -> EntityId {
+        let id = self.allocate_entity_id();
+        self.entities.insert(
             id,
-            WorldObject {
+            Entity {
                 id,
                 x,
                 y,
@@ -111,28 +110,28 @@ impl GameState {
                 vel_y: 0.0,
                 radius: PICKUP_RADIUS,
                 render: Some(render_body(VisualId::Pickup)),
-                kind: ObjectKind::Pickup { pickup_kind },
+                kind: EntityKind::Pickup { pickup_kind },
             },
         );
         id
     }
 
-    pub fn spawn_projectile_from_player(&mut self, player_id: PlayerId) -> Option<ObjectId> {
-        let player = self.players.get(&player_id)?;
-        let actor = self.objects.get(&player.controlled_object)?;
+    pub fn spawn_projectile_from_player(&mut self, controller_id: ControllerId) -> Option<EntityId> {
+        let player = self.players.get(&controller_id)?;
+        let pawn = self.entities.get(&player.pawn_id)?;
         let dir_x = player.dir_x;
         let dir_y = player.dir_y;
-        let actor_x = actor.x;
-        let actor_y = actor.y;
-        let actor_radius = actor.radius;
-        let spawn_distance = actor_radius + PROJECTILE_RADIUS + 0.05;
-        let spawn_x = actor_x + dir_x * spawn_distance;
-        let spawn_y = actor_y + dir_y * spawn_distance;
+        let pawn_x = pawn.x;
+        let pawn_y = pawn.y;
+        let pawn_radius = pawn.radius;
+        let spawn_distance = pawn_radius + PROJECTILE_RADIUS + 0.05;
+        let spawn_x = pawn_x + dir_x * spawn_distance;
+        let spawn_y = pawn_y + dir_y * spawn_distance;
 
-        let id = self.allocate_object_id();
-        self.objects.insert(
+        let id = self.allocate_entity_id();
+        self.entities.insert(
             id,
-            WorldObject {
+            Entity {
                 id,
                 x: spawn_x,
                 y: spawn_y,
@@ -140,8 +139,8 @@ impl GameState {
                 vel_y: dir_y * PROJECTILE_SPEED,
                 radius: PROJECTILE_RADIUS,
                 render: Some(render_body(VisualId::Projectile)),
-                kind: ObjectKind::Projectile {
-                    owner_player: Some(player_id),
+                kind: EntityKind::Projectile {
+                    owner_id: Some(controller_id),
                     ttl_ticks: PROJECTILE_TTL_TICKS,
                     damage: PROJECTILE_DAMAGE,
                 },
@@ -150,31 +149,40 @@ impl GameState {
         Some(id)
     }
 
-    pub fn remove_object(&mut self, object_id: ObjectId) {
-        self.objects.remove(&object_id);
+    pub fn remove_entity(&mut self, entity_id: EntityId) {
+        self.entities.remove(&entity_id);
     }
 
-    pub fn controlled_object(&self, player_id: PlayerId) -> Option<&WorldObject> {
+    pub fn teleport_entity(&mut self, entity_id: EntityId, x: f64, y: f64) -> Option<()> {
+        let entity = self.entities.get_mut(&entity_id)?;
+        entity.x = x;
+        entity.y = y;
+        entity.vel_x = 0.0;
+        entity.vel_y = 0.0;
+        Some(())
+    }
+
+    pub fn controlled_entity(&self, player_id: ControllerId) -> Option<&Entity> {
         let player = self.players.get(&player_id)?;
-        self.objects.get(&player.controlled_object)
+        self.entities.get(&player.pawn_id)
     }
 }
 
 /// pure function to advance the simulation by applying inputs to the given state
-/// both clients and server can use this to stay in sync
-pub fn tick(state: &GameState, inputs: &[InputMessage], map: &Map, delta: f64) -> GameState {
+/// both controllers and server can use this to stay in sync
+pub fn tick(state: &GameState, inputs: &[InputMessage], level: &Level, delta: f64) -> GameState {
     let mut next = state.clone();
     for msg in inputs {
-        apply_input(&mut next, msg, map, delta);
+        apply_input(&mut next, msg, level, delta);
     }
-    update_projectiles(&mut next, map, delta);
+    update_projectiles(&mut next, level, delta);
     collect_pickups(&mut next);
     next.tick += 1;
     next
 }
 
-pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta: f64) {
-    let Some(player) = state.players.get_mut(&input.player_id) else {
+pub fn apply_input(state: &mut GameState, input: &InputMessage, level: &Level, delta: f64) {
+    let Some(player) = state.players.get_mut(&input.controller_id) else {
         return;
     };
 
@@ -188,7 +196,7 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         player.dir_y = old_dir_x * sin + player.dir_y * cos;
     }
 
-    let controlled_object = player.controlled_object;
+    let pawn_id = player.pawn_id;
     let dir_x = player.dir_x;
     let dir_y = player.dir_y;
     // right vector: dir rotated 90° CW, independent of FOV
@@ -222,28 +230,28 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, map: &Map, delta
         move_dir_y /= move_len;
     }
 
-    let Some(actor) = state.objects.get_mut(&controlled_object) else {
+    let Some(pawn) = state.entities.get_mut(&pawn_id) else {
         return;
     };
 
-    actor.vel_x += move_dir_x * MOVE_SPEED * delta;
-    actor.vel_y += move_dir_y * MOVE_SPEED * delta;
+    pawn.vel_x += move_dir_x * MOVE_SPEED * delta;
+    pawn.vel_y += move_dir_y * MOVE_SPEED * delta;
 
-    let speed_sq = actor.vel_x * actor.vel_x + actor.vel_y * actor.vel_y;
+    let speed_sq = pawn.vel_x * pawn.vel_x + pawn.vel_y * pawn.vel_y;
     if speed_sq > 0.0 {
         let speed = speed_sq.sqrt();
         let drop = speed * FRICTION * delta;
         let new_speed = (speed - drop).max(0.0);
         if new_speed < speed {
-            actor.vel_x *= new_speed / speed;
-            actor.vel_y *= new_speed / speed;
+            pawn.vel_x *= new_speed / speed;
+            pawn.vel_y *= new_speed / speed;
         }
     }
 
-    move_dynamic_object(state, controlled_object, map, delta);
+    move_dynamic_entity(state, pawn_id, level, delta);
 
     if input.fire {
-        let _ = state.spawn_projectile_from_player(input.player_id);
+        let _ = state.spawn_projectile_from_player(input.controller_id);
     }
 }
 
@@ -258,8 +266,8 @@ fn render_body(visual: VisualId) -> RenderBody {
     }
 }
 
-fn move_dynamic_object(state: &mut GameState, object_id: ObjectId, map: &Map, delta: f64) {
-    let Some(snapshot) = state.objects.get(&object_id).cloned() else {
+fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level, delta: f64) {
+    let Some(snapshot) = state.entities.get(&entity_id).cloned() else {
         return;
     };
 
@@ -270,33 +278,37 @@ fn move_dynamic_object(state: &mut GameState, object_id: ObjectId, map: &Map, de
     let radius = snapshot.radius;
 
     let blockers: Vec<(f64, f64, f64)> = state
-        .objects
+        .entities
         .values()
-        .filter(|object| object.id != object_id && blocks_movement(object))
-        .map(|object| (object.x, object.y, object.radius))
+        .filter(|entity| entity.id != entity_id && blocks_movement(entity))
+        .map(|entity| (entity.x, entity.y, entity.radius))
         .collect();
 
-    depenetrate_walls(map, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
-    depenetrate_objects(&blockers, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
+    depenetrate_walls(level, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
+    depenetrate_entities(&blockers, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
 
-    if let Some(object) = state.objects.get_mut(&object_id) {
-        object.x = x;
-        object.y = y;
-        object.vel_x = vel_x;
-        object.vel_y = vel_y;
+    if let Some(entity) = state.entities.get_mut(&entity_id) {
+        entity.x = x;
+        entity.y = y;
+        entity.vel_x = vel_x;
+        entity.vel_y = vel_y;
     }
 }
 
 fn depenetrate_walls(
-    map: &Map,
+    level: &Level,
     x: &mut f64,
     y: &mut f64,
     vel_x: &mut f64,
     vel_y: &mut f64,
     radius: f64,
 ) {
-    let map_h = map.tiles.len() as i32;
-    let map_w = if map_h > 0 { map.tiles[0].len() as i32 } else { 0 };
+    let level_h = level.tiles.len() as i32;
+    let level_w = if level_h > 0 {
+        level.tiles[0].len() as i32
+    } else {
+        0
+    };
 
     for _ in 0..2 {
         let cx = x.floor() as i32;
@@ -305,10 +317,10 @@ fn depenetrate_walls(
             for ox in -1..=1i32 {
                 let tx = cx + ox;
                 let ty = cy + oy;
-                if tx < 0 || ty < 0 || tx >= map_w || ty >= map_h {
+                if tx < 0 || ty < 0 || tx >= level_w || ty >= level_h {
                     continue;
                 }
-                if !map.is_wall(tx as usize, ty as usize) {
+                if !level.is_wall(tx as usize, ty as usize) {
                     continue;
                 }
 
@@ -341,7 +353,7 @@ fn depenetrate_walls(
     }
 }
 
-fn depenetrate_objects(
+fn depenetrate_entities(
     blockers: &[(f64, f64, f64)],
     x: &mut f64,
     y: &mut f64,
@@ -378,23 +390,23 @@ fn depenetrate_objects(
     }
 }
 
-fn update_projectiles(state: &mut GameState, map: &Map, delta: f64) {
-    let projectile_ids: Vec<ObjectId> = state
-        .objects
+fn update_projectiles(state: &mut GameState, level: &Level, delta: f64) {
+    let projectile_ids: Vec<EntityId> = state
+        .entities
         .iter()
-        .filter_map(|(id, object)| match object.kind {
-            ObjectKind::Projectile { .. } => Some(*id),
+        .filter_map(|(id, entity)| match entity.kind {
+            EntityKind::Projectile { .. } => Some(*id),
             _ => None,
         })
         .collect();
 
     for projectile_id in projectile_ids {
-        let Some(projectile) = state.objects.get(&projectile_id).cloned() else {
+        let Some(projectile) = state.entities.get(&projectile_id).cloned() else {
             continue;
         };
 
-        let ObjectKind::Projectile {
-            owner_player,
+        let EntityKind::Projectile {
+            owner_id,
             ttl_ticks,
             damage,
         } = projectile.kind
@@ -403,7 +415,7 @@ fn update_projectiles(state: &mut GameState, map: &Map, delta: f64) {
         };
 
         if ttl_ticks == 0 {
-            state.remove_object(projectile_id);
+            state.remove_entity(projectile_id);
             continue;
         }
 
@@ -411,45 +423,47 @@ fn update_projectiles(state: &mut GameState, map: &Map, delta: f64) {
         let next_y = projectile.y + projectile.vel_y * delta;
         let next_ttl = ttl_ticks - 1;
 
-        let hit_wall = overlaps_wall(map, next_x, next_y, projectile.radius);
-        let hit_prop = state.objects.values().any(|object| {
-            object.id != projectile_id
-                && blocks_movement(object)
+        let hit_wall = overlaps_wall(level, next_x, next_y, projectile.radius);
+        let hit_prop = state.entities.values().any(|entity| {
+            entity.id != projectile_id
+                && blocks_movement(entity)
                 && circles_overlap(
                     next_x,
                     next_y,
                     projectile.radius,
-                    object.x,
-                    object.y,
-                    object.radius,
+                    entity.x,
+                    entity.y,
+                    entity.radius,
                 )
         });
-        let hit_actor = state.objects.values().any(|object| match object.kind {
-            ObjectKind::Actor { owner_player: target_owner } => {
-                object.id != projectile_id
-                    && target_owner != owner_player
+        let hit_pawn = state.entities.values().any(|entity| match entity.kind {
+            EntityKind::Pawn {
+                owner_id: target_owner,
+            } => {
+                entity.id != projectile_id
+                    && target_owner != owner_id
                     && circles_overlap(
                         next_x,
                         next_y,
                         projectile.radius,
-                        object.x,
-                        object.y,
-                        object.radius,
+                        entity.x,
+                        entity.y,
+                        entity.radius,
                     )
             }
             _ => false,
         });
 
-        if hit_wall || hit_prop || hit_actor {
-            state.remove_object(projectile_id);
+        if hit_wall || hit_prop || hit_pawn {
+            state.remove_entity(projectile_id);
             continue;
         }
 
-        if let Some(object) = state.objects.get_mut(&projectile_id) {
-            object.x = next_x;
-            object.y = next_y;
-            object.kind = ObjectKind::Projectile {
-                owner_player,
+        if let Some(entity) = state.entities.get_mut(&projectile_id) {
+            entity.x = next_x;
+            entity.y = next_y;
+            entity.kind = EntityKind::Projectile {
+                owner_id,
                 ttl_ticks: next_ttl,
                 damage,
             };
@@ -458,60 +472,64 @@ fn update_projectiles(state: &mut GameState, map: &Map, delta: f64) {
 }
 
 fn collect_pickups(state: &mut GameState) {
-    let actor_snapshots: Vec<(f64, f64, f64)> = state
-        .objects
+    let pawn_snapshots: Vec<(f64, f64, f64)> = state
+        .entities
         .values()
-        .filter_map(|object| match object.kind {
-            ObjectKind::Actor { .. } => Some((object.x, object.y, object.radius)),
+        .filter_map(|entity| match entity.kind {
+            EntityKind::Pawn { .. } => Some((entity.x, entity.y, entity.radius)),
             _ => None,
         })
         .collect();
 
-    let pickup_ids: Vec<ObjectId> = state
-        .objects
+    let pickup_ids: Vec<EntityId> = state
+        .entities
         .iter()
-        .filter_map(|(id, object)| match object.kind {
-            ObjectKind::Pickup { .. } => Some(*id),
+        .filter_map(|(id, entity)| match entity.kind {
+            EntityKind::Pickup { .. } => Some(*id),
             _ => None,
         })
         .collect();
 
     for pickup_id in pickup_ids {
-        let Some(pickup) = state.objects.get(&pickup_id) else {
+        let Some(pickup) = state.entities.get(&pickup_id) else {
             continue;
         };
 
-        let collected = actor_snapshots.iter().any(|(actor_x, actor_y, actor_radius)| {
+        let collected = pawn_snapshots.iter().any(|(pawn_x, pawn_y, pawn_radius)| {
             circles_overlap(
                 pickup.x,
                 pickup.y,
                 pickup.radius,
-                *actor_x,
-                *actor_y,
-                *actor_radius,
+                *pawn_x,
+                *pawn_y,
+                *pawn_radius,
             )
         });
 
         if collected {
-            state.remove_object(pickup_id);
+            state.remove_entity(pickup_id);
         }
     }
 }
 
-fn overlaps_wall(map: &Map, x: f64, y: f64, radius: f64) -> bool {
+fn overlaps_wall(level: &Level, x: f64, y: f64, radius: f64) -> bool {
     let cx = x.floor() as i32;
     let cy = y.floor() as i32;
-    let map_h = map.tiles.len() as i32;
-    let map_w = if map_h > 0 { map.tiles[0].len() as i32 } else { 0 };
+    let level_h = level.tiles.len() as i32;
+    let level_w = if level_h > 0 {
+        level.tiles[0].len() as i32
+    } else {
+        0
+    };
 
     for oy in -1..=1i32 {
         for ox in -1..=1i32 {
             let tx = cx + ox;
             let ty = cy + oy;
-            if tx < 0 || ty < 0 || tx >= map_w || ty >= map_h {
+            if tx < 0 || ty < 0 || tx >= level_w || ty >= level_h {
                 continue;
             }
-            if !map.is_wall(tx as usize, ty as usize) {
+            if !level.is_wall(tx as usize, ty as usize) {
                 continue;
             }
 
@@ -535,10 +553,10 @@ fn circles_overlap(x1: f64, y1: f64, r1: f64, x2: f64, y2: f64, r2: f64) -> bool
     dx * dx + dy * dy < min_dist * min_dist
 }
 
-fn blocks_movement(object: &WorldObject) -> bool {
+fn blocks_movement(entity: &Entity) -> bool {
     matches!(
-        object.kind,
-        ObjectKind::StaticProp {
+        entity.kind,
+        EntityKind::StaticProp {
             blocks_movement: true
         }
     )
@@ -546,23 +564,23 @@ fn blocks_movement(object: &WorldObject) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_input, GameState, PlayerState, TICK_DT};
+    use super::{GameState, Player, TICK_DT, apply_input};
     use crate::input::InputMessage;
-    use crate::model::Map;
+    use crate::model::Level;
 
     #[test]
     fn diagonal_movement_matches_straight_line_speed() {
-        let map = Map::new(vec![vec![0; 5]; 5]);
+        let level = Level::new(vec![vec![0; 5]; 5]);
         let forward_state = make_state();
         let diagonal_state = make_state();
 
         let mut forward_input = InputMessage {
-            player_id: 1,
+            controller_id: 1,
             forward: true,
             ..InputMessage::default()
         };
         let diagonal_input = InputMessage {
-            player_id: 1,
+            controller_id: 1,
             forward: true,
             strafe_right: true,
             ..InputMessage::default()
@@ -571,33 +589,49 @@ mod tests {
         let mut forward_state = forward_state;
         let mut diagonal_state = diagonal_state;
 
-        apply_input(&mut forward_state, &forward_input, &map, TICK_DT);
-        apply_input(&mut diagonal_state, &diagonal_input, &map, TICK_DT);
+        apply_input(&mut forward_state, &forward_input, &level, TICK_DT);
+        apply_input(&mut diagonal_state, &diagonal_input, &level, TICK_DT);
 
-        let forward_actor = forward_state.objects.get(&1).unwrap();
-        let diagonal_actor = diagonal_state.objects.get(&1).unwrap();
-        let forward_speed = (forward_actor.vel_x * forward_actor.vel_x
-            + forward_actor.vel_y * forward_actor.vel_y)
+        let forward_pawn = forward_state.entities.get(&1).unwrap();
+        let diagonal_pawn = diagonal_state.entities.get(&1).unwrap();
+        let forward_speed = (forward_pawn.vel_x * forward_pawn.vel_x
+            + forward_pawn.vel_y * forward_pawn.vel_y)
             .sqrt();
-        let diagonal_speed = (diagonal_actor.vel_x * diagonal_actor.vel_x
-            + diagonal_actor.vel_y * diagonal_actor.vel_y)
+        let diagonal_speed = (diagonal_pawn.vel_x * diagonal_pawn.vel_x
+            + diagonal_pawn.vel_y * diagonal_pawn.vel_y)
             .sqrt();
 
         assert!((diagonal_speed - forward_speed).abs() < 1e-9);
 
         forward_input.strafe_right = true;
-        apply_input(&mut forward_state, &forward_input, &map, TICK_DT);
-        let forward_actor = forward_state.objects.get(&1).unwrap();
-        let post_turn_speed = (forward_actor.vel_x * forward_actor.vel_x
-            + forward_actor.vel_y * forward_actor.vel_y)
+        apply_input(&mut forward_state, &forward_input, &level, TICK_DT);
+        let forward_pawn = forward_state.entities.get(&1).unwrap();
+        let post_turn_speed = (forward_pawn.vel_x * forward_pawn.vel_x
+            + forward_pawn.vel_y * forward_pawn.vel_y)
             .sqrt();
         assert!(post_turn_speed >= forward_speed);
     }
 
+    #[test]
+    fn teleport_entity_updates_position_and_clears_velocity() {
+        let mut state = make_state();
+        let pawn = state.entities.get_mut(&1).unwrap();
+        pawn.vel_x = 3.5;
+        pawn.vel_y = -1.25;
+
+        assert_eq!(state.teleport_entity(1, 7.0, 9.0), Some(()));
+
+        let pawn = state.entities.get(&1).unwrap();
+        assert_eq!(pawn.x, 7.0);
+        assert_eq!(pawn.y, 9.0);
+        assert_eq!(pawn.vel_x, 0.0);
+        assert_eq!(pawn.vel_y, 0.0);
+    }
+
     fn make_state() -> GameState {
         let mut state = GameState::new();
-        let actor_id = state.spawn_actor(2.5, 2.5, Some(1));
-        state.players.insert(1, PlayerState::new(actor_id));
+        let pawn_id = state.spawn_pawn(2.5, 2.5, Some(1));
+        state.players.insert(1, Player::new(pawn_id));
         state
     }
 }

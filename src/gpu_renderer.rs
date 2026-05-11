@@ -6,10 +6,10 @@ use glam::{Mat4, Vec3};
 use image::{Rgba, RgbaImage};
 use wgpu::util::DeviceExt;
 
-use crate::model::Map;
+use crate::model::Level;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
 use crate::texture::{
-    animation_descriptor, AnimationDescriptor, AnimationPlayback, TextureKey, TextureManager,
+    AnimationDescriptor, AnimationPlayback, TextureKey, TextureManager, animation_descriptor,
 };
 
 pub const SCENE_WIDTH: u32 = 640;
@@ -26,12 +26,10 @@ const AFFINE_BLEND: f32 = 0.4;
 const SKY_COLOR: &str = "#575ff8"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
-    let [r, g, b] = [1, 3, 5].map(|i| {
-        u8::from_str_radix(&hex[i..i+2], 16).unwrap() as f64 / 255.0
-    });
+    let [r, g, b] =
+        [1, 3, 5].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as f64 / 255.0);
     wgpu::Color { r, g, b, a: 1.0 }
 }
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -137,7 +135,7 @@ impl SceneRenderer {
     pub fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        map: &Map,
+        level: &Level,
         texture_manager: &TextureManager,
         surface_format: wgpu::TextureFormat,
         scene_width: u32,
@@ -317,56 +315,67 @@ impl SceneRenderer {
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
                 affine_params: [AFFINE_BLEND, scene_width as f32, scene_height as f32, 0.0],
-                snap_params: [scene_width as f32 / 2.0, scene_height as f32 / 2.0, 0.0, 0.0],
+                snap_params: [
+                    scene_width as f32 / 2.0,
+                    scene_height as f32 / 2.0,
+                    0.0,
+                    0.0,
+                ],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let ntsc_encode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("cpu_game_ntsc_encode_uniforms"),
-            contents: bytemuck::bytes_of(&build_encode_uniforms(
-                scene_width,
-                scene_height,
-                0.0,
-            )),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let ntsc_decode_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("cpu_game_ntsc_decode_uniforms"),
-            contents: bytemuck::bytes_of(&build_decode_uniforms(composite_width, composite_height)),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let ntsc_encode_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("cpu_game_ntsc_encode_uniforms"),
+                contents: bytemuck::bytes_of(&build_encode_uniforms(
+                    scene_width,
+                    scene_height,
+                    0.0,
+                )),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let ntsc_decode_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("cpu_game_ntsc_decode_uniforms"),
+                contents: bytemuck::bytes_of(&build_decode_uniforms(
+                    composite_width,
+                    composite_height,
+                )),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
-        let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("cpu_game_scene_bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let scene_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cpu_game_scene_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
         let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cpu_game_scene_bg"),
             layout: &scene_bind_group_layout,
@@ -386,58 +395,60 @@ impl SceneRenderer {
             ],
         });
 
-        let blit_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("cpu_game_blit_bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let blit_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cpu_game_blit_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let post_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("cpu_game_post_bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                ],
+            });
+        let post_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cpu_game_post_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
         let ntsc_encode_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cpu_game_ntsc_encode_bg"),
             layout: &post_bind_group_layout,
@@ -520,11 +531,12 @@ impl SceneRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_blit.wgsl").into()),
         });
 
-        let scene_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cpu_game_scene_pl"),
-            bind_group_layouts: &[&scene_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let scene_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("cpu_game_scene_pl"),
+                bind_group_layouts: &[&scene_bind_group_layout],
+                push_constant_ranges: &[],
+            });
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("cpu_game_scene_pipeline"),
             layout: Some(&scene_pipeline_layout),
@@ -677,7 +689,7 @@ impl SceneRenderer {
             cache: None,
         });
 
-        let (wall_vertices, wall_indices) = build_static_mesh(map, &atlas_rects, texture_manager);
+        let (wall_vertices, wall_indices) = build_static_mesh(level, &atlas_rects, texture_manager);
         let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_wall_vertices"),
             contents: bytemuck::cast_slice(&wall_vertices),
@@ -743,8 +755,18 @@ impl SceneRenderer {
             0,
             bytemuck::bytes_of(&SceneUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
-                affine_params: [AFFINE_BLEND, self.scene_width as f32, self.scene_height as f32, 0.0],
-                snap_params: [self.scene_width as f32 / 2.0, self.scene_height as f32 / 2.0, 0.0, 0.0],
+                affine_params: [
+                    AFFINE_BLEND,
+                    self.scene_width as f32,
+                    self.scene_height as f32,
+                    0.0,
+                ],
+                snap_params: [
+                    self.scene_width as f32 / 2.0,
+                    self.scene_height as f32 / 2.0,
+                    0.0,
+                    0.0,
+                ],
             }),
         );
         self.queue.write_buffer(
@@ -978,7 +1000,8 @@ fn create_sprite_buffer(device: &wgpu::Device, vertex_capacity: usize) -> wgpu::
 
 fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: u32) -> Mat4 {
     let aspect = scene_width as f32 / scene_height as f32;
-    let plane_len = ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
+    let plane_len =
+        ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
     // plane_len is tan(half_hfov), convert to vfov for perspective_lh
     let vfov = 2.0 * (plane_len / aspect).atan();
 
@@ -989,9 +1012,15 @@ fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: 
     projection * view
 }
 
-fn build_encode_uniforms(scene_width: u32, scene_height: u32, anim_elapsed_ms: f64) -> NtscEncodeUniforms {
+fn build_encode_uniforms(
+    scene_width: u32,
+    scene_height: u32,
+    anim_elapsed_ms: f64,
+) -> NtscEncodeUniforms {
     let elapsed_seconds = (anim_elapsed_ms * 0.001) as f32;
-    let frame_phase = (elapsed_seconds * NTSC_PHASE_FLIP_HZ).floor().rem_euclid(2.0);
+    let frame_phase = (elapsed_seconds * NTSC_PHASE_FLIP_HZ)
+        .floor()
+        .rem_euclid(2.0);
 
     NtscEncodeUniforms {
         source_size: [scene_width as f32, scene_height as f32],
@@ -1020,7 +1049,12 @@ fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
         .map(|texture| texture.width() + padding)
         .sum::<u32>()
         + padding;
-    let height = textures.iter().map(image::GenericImageView::height).max().unwrap_or(1) + padding * 2;
+    let height = textures
+        .iter()
+        .map(image::GenericImageView::height)
+        .max()
+        .unwrap_or(1)
+        + padding * 2;
 
     let mut atlas = RgbaImage::from_pixel(width.max(1), height.max(1), Rgba([0, 0, 0, 0]));
     let mut rects = Vec::with_capacity(textures.len());
@@ -1049,19 +1083,20 @@ fn build_texture_atlas(textures: &[RgbaImage]) -> (RgbaImage, Vec<AtlasRect>) {
 }
 
 fn build_static_mesh(
-    map: &Map,
+    level: &Level,
     atlas_rects: &[AtlasRect],
     texture_manager: &TextureManager,
 ) -> (Vec<SceneVertex>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let height = map.tiles.len();
-    let width = map.tiles.first().map_or(0, Vec::len);
+    let height = level.tiles.len();
+    let width = level.tiles.first().map_or(0, Vec::len);
 
     for z in 0..height {
         for x in 0..width {
-            if !map.is_wall(x, z) {
-                let texture_index = texture_manager.texture_index(TextureKey::Floor(map.floor_at(x, z)));
+            if !level.is_wall(x, z) {
+                let texture_index =
+                    texture_manager.texture_index(TextureKey::Floor(level.floor_at(x, z)));
                 let rect = inset_atlas_rect_half_texel(
                     atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))],
                 );
@@ -1083,7 +1118,7 @@ fn build_static_mesh(
                 continue;
             }
 
-            let texture_key = texture_manager.wall_texture(map.tile_at(x, z));
+            let texture_key = texture_manager.wall_texture(level.tile_at(x, z));
             let texture_index = texture_manager.texture_index(texture_key);
             let rect = inset_atlas_rect_half_texel(
                 atlas_rects[texture_index.min(atlas_rects.len().saturating_sub(1))],
@@ -1093,10 +1128,10 @@ fn build_static_mesh(
             let z0 = z as f32;
             let z1 = z0 + 1.0;
 
-            let left_empty = x == 0 || !map.is_wall(x - 1, z);
-            let right_empty = x + 1 >= width || !map.is_wall(x + 1, z);
-            let north_empty = z == 0 || !map.is_wall(x, z - 1);
-            let south_empty = z + 1 >= height || !map.is_wall(x, z + 1);
+            let left_empty = x == 0 || !level.is_wall(x - 1, z);
+            let right_empty = x + 1 >= width || !level.is_wall(x + 1, z);
+            let north_empty = z == 0 || !level.is_wall(x, z - 1);
+            let south_empty = z + 1 >= height || !level.is_wall(x, z + 1);
 
             if left_empty {
                 push_quad(
@@ -1193,8 +1228,7 @@ fn build_sprite_vertices(
         let Some(rect) = atlas_rects.get(texture_index) else {
             continue;
         };
-        let uv_rect =
-            select_sprite_uv_rect(*rect, &billboard, camera_dir, anim_elapsed_ms);
+        let uv_rect = select_sprite_uv_rect(*rect, &billboard, camera_dir, anim_elapsed_ms);
         let center = Vec3::new(billboard.x as f32, 0.0, billboard.y as f32);
         let half_width = right * (billboard.width * 0.5);
         let up = Vec3::new(0.0, billboard.height, 0.0);
@@ -1251,11 +1285,10 @@ fn select_sprite_uv_rect(
 
     let frame_step = (anim_elapsed_ms / animation.ms_per_frame).floor() as u32;
     let frame_col = animation_frame_column(animation, frame_step, billboard.is_moving);
-    let side_row = if animation.directional_rows && matches!(billboard.facing_mode, crate::texture::FacingMode::Movement) {
-        side_to_row(get_visible_side(
-            billboard.facing_dir,
-            camera_dir,
-        )) as usize
+    let side_row = if animation.directional_rows
+        && matches!(billboard.facing_mode, crate::texture::FacingMode::Movement)
+    {
+        side_to_row(get_visible_side(billboard.facing_dir, camera_dir)) as usize
     } else {
         animation_frame_row(animation, frame_step)
     };
@@ -1271,7 +1304,8 @@ fn select_sprite_uv_rect(
         u0: rect.u0 + frame_origin_x as f32 * width_scale + half_texel_u,
         v0: rect.v0 + frame_origin_y as f32 * height_scale + half_texel_v,
         u1: rect.u0 + (frame_origin_x + animation.frame_width) as f32 * width_scale - half_texel_u,
-        v1: rect.v0 + (frame_origin_y + animation.frame_height) as f32 * height_scale - half_texel_v,
+        v1: rect.v0 + (frame_origin_y + animation.frame_height) as f32 * height_scale
+            - half_texel_v,
         pixel_width: animation.frame_width as u32,
         pixel_height: animation.frame_height as u32,
     }
@@ -1311,7 +1345,11 @@ fn get_visible_side(entity_dir: (f64, f64), camera_dir: (f64, f64)) -> VisibleSi
     }
     // |cos(rel)| >= cos(45°)=1/√2  ↔  dot² >= 0.5*len_sq
     if dot * dot >= 0.5 * len_sq {
-        if dot >= 0.0 { VisibleSide::Back } else { VisibleSide::Front }
+        if dot >= 0.0 {
+            VisibleSide::Back
+        } else {
+            VisibleSide::Front
+        }
     } else if cross < 0.0 {
         VisibleSide::Left
     } else {
@@ -1370,7 +1408,10 @@ fn push_quad(
         let pos = lerp3(bottom, top, t);
         let u = left_u + (right_u - left_u) * s;
         let v = rect.v1 + (rect.v0 - rect.v1) * t;
-        SceneVertex { position: pos, uv: [u, v] }
+        SceneVertex {
+            position: pos,
+            uv: [u, v],
+        }
     };
 
     for ti in 0..DIVS {

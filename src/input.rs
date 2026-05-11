@@ -1,8 +1,8 @@
-use crate::model::PlayerId;
+use crate::model::ControllerId;
 
 #[derive(Clone, Debug, Default)]
 pub struct InputMessage {
-    pub player_id: PlayerId,
+    pub controller_id: ControllerId,
     pub tick: u64,
     pub forward: bool,
     pub back: bool,

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 static TEXTURES_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/textures");
 
@@ -33,7 +33,7 @@ pub enum ItemTexture {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ActorTexture {
+pub enum PawnTexture {
     Red,
 }
 
@@ -47,13 +47,13 @@ pub enum TextureKey {
     Wall(WallTexture),
     Floor(FloorTexture),
     Item(ItemTexture),
-    Actor(ActorTexture),
+    Pawn(PawnTexture),
     Projectile(ProjectileTexture),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum VisualId {
-    PlayerActor,
+    PlayerPawn,
     StaticProp,
     Pickup,
     Projectile,
@@ -114,9 +114,6 @@ impl TextureManager {
             let Some(name) = path.file_name() else {
                 continue;
             };
-            if name == "map.png" {
-                continue;
-            }
 
             let stem = path.file_stem().unwrap().to_string_lossy().to_string();
             let Some(key) = parse_texture_key(&stem) else {
@@ -193,7 +190,7 @@ impl TextureManager {
             TextureKey::Floor(FloorTexture::Smooth),
             TextureKey::Floor(FloorTexture::MilkVeins),
             TextureKey::Item(ItemTexture::Health),
-            TextureKey::Actor(ActorTexture::Red),
+            TextureKey::Pawn(PawnTexture::Red),
             TextureKey::Projectile(ProjectileTexture::Spiral),
         ] {
             let _ = self.texture_index(key);
@@ -203,8 +200,8 @@ impl TextureManager {
 
 pub fn visual_definition(visual: VisualId) -> VisualDefinition {
     match visual {
-        VisualId::PlayerActor => VisualDefinition {
-            texture: TextureKey::Actor(ActorTexture::Red),
+        VisualId::PlayerPawn => VisualDefinition {
+            texture: TextureKey::Pawn(PawnTexture::Red),
             billboard_width: 0.85,
             billboard_height: 0.85,
             facing_mode: FacingMode::Movement,
@@ -266,7 +263,7 @@ fn parse_texture_key(stem: &str) -> Option<TextureKey> {
         "floor.smooth" => Some(TextureKey::Floor(FloorTexture::Smooth)),
         "floor.milkveins" => Some(TextureKey::Floor(FloorTexture::MilkVeins)),
         "item.health" => Some(TextureKey::Item(ItemTexture::Health)),
-        "actor.red" => Some(TextureKey::Actor(ActorTexture::Red)),
+        "pawn.red" => Some(TextureKey::Pawn(PawnTexture::Red)),
         "projectile.spiral" => Some(TextureKey::Projectile(ProjectileTexture::Spiral)),
         _ => None,
     }
@@ -280,7 +277,7 @@ fn texture_sort_key(key: TextureKey) -> (u8, u8) {
         TextureKey::Floor(FloorTexture::Smooth) => (1, 0),
         TextureKey::Floor(FloorTexture::MilkVeins) => (1, 1),
         TextureKey::Item(ItemTexture::Health) => (2, 0),
-        TextureKey::Actor(ActorTexture::Red) => (3, 0),
+        TextureKey::Pawn(PawnTexture::Red) => (3, 0),
         TextureKey::Projectile(ProjectileTexture::Spiral) => (4, 0),
     }
 }

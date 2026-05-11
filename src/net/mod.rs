@@ -1,13 +1,13 @@
-pub mod client;
+pub mod bots;
+pub mod local_controller;
 pub mod server;
-pub mod bot;
 
 use crate::input::InputMessage;
-use crate::model::PlayerId;
+use crate::model::ControllerId;
 use crate::simulation::GameState;
 
-pub trait Client: Send {
-    fn id(&self) -> PlayerId;
+pub trait Controller: Send {
+    fn id(&self) -> ControllerId;
     /// Return all inputs accumulated since the last call.
     fn poll_inputs(&mut self) -> Vec<InputMessage>;
     /// Called by the server after each authoritative tick.

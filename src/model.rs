@@ -1,8 +1,7 @@
-
 use crate::texture::{AnimationStyle, FacingMode, FloorTexture, VisualId};
 
-pub type PlayerId = u64;
-pub type ObjectId = u64;
+pub type ControllerId = u64;
+pub type EntityId = u64;
 
 #[derive(Clone, Debug)]
 pub struct RenderBody {
@@ -19,36 +18,42 @@ pub enum PickupKind {
 }
 
 #[derive(Clone, Debug)]
-pub enum ObjectKind {
-    Actor { owner_player: Option<PlayerId> },
-    StaticProp { blocks_movement: bool },
-    Pickup { pickup_kind: PickupKind },
+pub enum EntityKind {
+    Pawn {
+        owner_id: Option<ControllerId>,
+    },
+    StaticProp {
+        blocks_movement: bool,
+    },
+    Pickup {
+        pickup_kind: PickupKind,
+    },
     Projectile {
-        owner_player: Option<PlayerId>,
+        owner_id: Option<ControllerId>,
         ttl_ticks: u32,
         damage: u32,
     },
 }
 
 #[derive(Clone, Debug)]
-pub struct WorldObject {
-    pub id: ObjectId,
+pub struct Entity {
+    pub id: EntityId,
     pub x: f64,
     pub y: f64,
     pub vel_x: f64,
     pub vel_y: f64,
     pub radius: f64,
     pub render: Option<RenderBody>,
-    pub kind: ObjectKind,
+    pub kind: EntityKind,
 }
 
 #[derive(Clone, Debug)]
-pub struct Map {
+pub struct Level {
     pub tiles: Vec<Vec<u8>>,
     pub floor_tiles: Vec<Vec<FloorTexture>>,
 }
 
-impl Map {
+impl Level {
     pub fn new(tiles: Vec<Vec<u8>>) -> Self {
         let height = tiles.len();
         let width = tiles.first().map_or(0, |row| row.len());
@@ -57,9 +62,17 @@ impl Map {
     }
 
     pub fn with_floor_tiles(tiles: Vec<Vec<u8>>, floor_tiles: Vec<Vec<FloorTexture>>) -> Self {
-        assert_eq!(tiles.len(), floor_tiles.len(), "floor tile row count must match map tiles");
+        assert_eq!(
+            tiles.len(),
+            floor_tiles.len(),
+            "floor tile row count must match level tiles"
+        );
         for (tile_row, floor_row) in tiles.iter().zip(floor_tiles.iter()) {
-            assert_eq!(tile_row.len(), floor_row.len(), "floor tile column count must match map tiles");
+            assert_eq!(
+                tile_row.len(),
+                floor_row.len(),
+                "floor tile column count must match level tiles"
+            );
         }
         Self { tiles, floor_tiles }
     }
@@ -77,16 +90,16 @@ impl Map {
     }
 
     pub fn get_empty_tiles(&self) -> Vec<(usize, usize)> {
-    let mut empty_tiles = Vec::new();
-    for (y, row) in self.tiles.iter().enumerate() {
-        for (x, &tile) in row.iter().enumerate() {
-            if tile == 0 {
-                empty_tiles.push((x, y));
+        let mut empty_tiles = Vec::new();
+        for (y, row) in self.tiles.iter().enumerate() {
+            for (x, &tile) in row.iter().enumerate() {
+                if tile == 0 {
+                    empty_tiles.push((x, y));
+                }
             }
         }
+        empty_tiles
     }
-    empty_tiles
-}
 }
 
 pub struct AoField {
@@ -99,4 +112,19 @@ pub struct AoParameters {
     pub corner_strength: f64,
     pub wall_seam_strength: f64,
     pub minimum_light: f64,
+}
+
+pub struct Waypoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Waypoint {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+
+    pub fn is_wall(&self, level: &Level) -> bool {
+        level.is_wall(self.x as usize, self.y as usize)
+    }
 }

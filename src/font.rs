@@ -50,7 +50,9 @@ impl Font {
             }
         }
 
-        Self { glyphs: glyphs.into_boxed_slice() }
+        Self {
+            glyphs: glyphs.into_boxed_slice(),
+        }
     }
 
     /// Returns the glyph for `ch`, or `None` if outside the font's character range.

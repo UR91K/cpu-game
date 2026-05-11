@@ -1,6 +1,6 @@
-use crate::model::{ObjectKind, PlayerId};
+use crate::model::{ControllerId, EntityKind};
 use crate::simulation::GameState;
-use crate::texture::{visual_definition, AnimationStyle, FacingMode, TextureKey};
+use crate::texture::{AnimationStyle, FacingMode, TextureKey, visual_definition};
 
 #[derive(Clone, Debug)]
 pub struct RenderScene {
@@ -31,16 +31,20 @@ pub struct RenderBillboard {
     pub animation: AnimationStyle,
 }
 
-pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -> Option<RenderScene> {
+pub fn assemble_scene(
+    state: &GameState,
+    viewer: ControllerId,
+    fov_plane_len: f64,
+) -> Option<RenderScene> {
     let player = state.players.get(&viewer)?;
-    let actor = state.objects.get(&player.controlled_object)?;
+    let pawn = state.entities.get(&player.pawn_id)?;
     // Derive camera plane from dir rotated 90° CW, scaled by fov_plane_len.
     // plane_len = tan(half_hfov), so fov_plane_len controls horizontal FOV.
     let plane_x = player.dir_y * fov_plane_len;
     let plane_y = -player.dir_x * fov_plane_len;
     let camera = RenderCamera {
-        x: actor.x,
-        y: actor.y,
+        x: pawn.x,
+        y: pawn.y,
         dir_x: player.dir_x,
         dir_y: player.dir_y,
         plane_x,
@@ -48,20 +52,22 @@ pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -
     };
 
     let billboards = state
-        .objects
+        .entities
         .values()
-        .filter_map(|object| {
-            let render = object.render.as_ref()?;
+        .filter_map(|entity| {
+            let render = entity.render.as_ref()?;
             let definition = visual_definition(render.visual);
-            let speed_sq = object.vel_x * object.vel_x + object.vel_y * object.vel_y;
+            let speed_sq = entity.vel_x * entity.vel_x + entity.vel_y * entity.vel_y;
             let is_moving = speed_sq > 1e-6;
             let facing_dir = if is_moving {
-                (object.vel_x, object.vel_y)
+                (entity.vel_x, entity.vel_y)
             } else {
-                match object.kind {
-                    ObjectKind::Actor { owner_player: Some(owner_player) } => state
+                match entity.kind {
+                    EntityKind::Pawn {
+                        owner_id: Some(owner_id),
+                    } => state
                         .players
-                        .get(&owner_player)
+                        .get(&owner_id)
                         .map(|owner| (owner.dir_x, owner.dir_y))
                         .unwrap_or((0.0, 0.0)),
                     _ => (0.0, 0.0),
@@ -69,8 +75,8 @@ pub fn assemble_scene(state: &GameState, viewer: PlayerId, fov_plane_len: f64) -
             };
 
             Some(RenderBillboard {
-                x: object.x,
-                y: object.y,
+                x: entity.x,
+                y: entity.y,
                 texture: definition.texture,
                 facing_dir,
                 is_moving,

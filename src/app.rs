@@ -8,13 +8,13 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::gpu_renderer::{SceneRenderer, SCENE_HEIGHT, SCENE_WIDTH};
+use crate::font::Font;
+use crate::gpu_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
 use crate::input::InputMessage;
-use crate::model::PlayerId;
+use crate::model::ControllerId;
 use crate::net::server::Server;
 use crate::render_assembly;
 use crate::texture::TextureManager;
-use crate::font::Font;
 
 const TARGET_FPS: u64 = 60;
 
@@ -37,7 +37,7 @@ pub struct App {
     state: Option<WindowState>,
     server: Server,
     input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
-    human_id: PlayerId,
+    human_id: ControllerId,
     keys: HashSet<KeyCode>,
     last_frame: Instant,
     frame_duration: Duration,
@@ -57,7 +57,7 @@ impl App {
     pub fn new(
         server: Server,
         input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
-        human_id: PlayerId,
+        human_id: ControllerId,
         texture_manager: TextureManager,
     ) -> Self {
         Self {
@@ -133,7 +133,7 @@ impl App {
         self.anim_elapsed_ms += delta * 1000.0;
         self.current_tick += 1;
         let msg = InputMessage {
-            player_id: self.human_id,
+            controller_id: self.human_id,
             tick: self.current_tick,
             forward: self.keys.contains(&KeyCode::KeyW),
             back: self.keys.contains(&KeyCode::KeyS),
@@ -150,7 +150,7 @@ impl App {
         // push a rotation-only message immediately so it's included in the next server tick.
         self.current_tick += 1;
         let msg = InputMessage {
-            player_id: self.human_id,
+            controller_id: self.human_id,
             tick: self.current_tick,
             rotate_delta: angle,
             ..Default::default()
@@ -163,7 +163,11 @@ impl App {
             return;
         };
 
-        let scene = match render_assembly::assemble_scene(&self.server.state, self.human_id, self.fov_plane_len) {
+        let scene = match render_assembly::assemble_scene(
+            &self.server.state,
+            self.human_id,
+            self.fov_plane_len,
+        ) {
             Some(scene) => scene,
             None => return,
         };
@@ -204,32 +208,49 @@ impl App {
             let w = state.renderer.scene_size().0 as usize;
             let h = state.renderer.scene_size().1 as usize;
             let mut buf = vec![0u8; w * h * 4];
-            self.font.draw_text(&mut buf, w, h, "FONT TEST  (F4 TO TOGGLE)", 8, 8, [255, 255, 255]);
+            self.font.draw_text(
+                &mut buf,
+                w,
+                h,
+                "FONT TEST  (F4 TO TOGGLE)",
+                8,
+                8,
+                [255, 255, 255],
+            );
             for row in 0..FONT_ROWS {
                 let start = FIRST_ASCII as u32 + (row * FONT_COLS) as u32;
                 let end = (start + FONT_COLS as u32).min(128);
                 let line: String = (start..end).filter_map(char::from_u32).collect();
-                self.font.draw_text(&mut buf, w, h, &line, 8, 32 + row * GLYPH_H, [255, 255, 255]);
+                self.font.draw_text(
+                    &mut buf,
+                    w,
+                    h,
+                    &line,
+                    8,
+                    32 + row * GLYPH_H,
+                    [255, 255, 255],
+                );
             }
             Some(buf)
         } else {
             None
         };
 
+        state.renderer.render_frame(
+            &mut encoder,
+            &view,
+            (vx, vy, vw, vh),
+            &scene.camera,
+            &scene.billboards,
+            self.anim_elapsed_ms,
+            self.current_tick,
+            overlay_buf.as_deref(),
+        );
+
         state
             .renderer
-            .render_frame(
-                &mut encoder,
-                &view,
-                (vx, vy, vw, vh),
-                &scene.camera,
-                &scene.billboards,
-                self.anim_elapsed_ms,
-                self.current_tick,
-                overlay_buf.as_deref(),
-            );
-
-        state.renderer.queue.submit(std::iter::once(encoder.finish()));
+            .queue
+            .submit(std::iter::once(encoder.finish()));
         output.present();
     }
 
@@ -238,11 +259,12 @@ impl App {
             if let Some(state) = &mut self.state {
                 state.surface_config.width = new_size.width;
                 state.surface_config.height = new_size.height;
-                let scene_width = SceneRenderer::calculate_scene_width(new_size.width, new_size.height);
+                let scene_width =
+                    SceneRenderer::calculate_scene_width(new_size.width, new_size.height);
                 state.renderer = SceneRenderer::new(
                     state.renderer.device.clone(),
                     state.renderer.queue.clone(),
-                    &self.server.map,
+                    &self.server.level,
                     &state.texture_manager,
                     state.surface_config.format,
                     scene_width,
@@ -301,11 +323,12 @@ impl ApplicationHandler for App {
             .take()
             .expect("texture manager should only be consumed once");
         let window_size = window.inner_size();
-        let scene_width = SceneRenderer::calculate_scene_width(window_size.width, window_size.height);
+        let scene_width =
+            SceneRenderer::calculate_scene_width(window_size.width, window_size.height);
         let renderer = SceneRenderer::new(
             device.clone(),
             queue.clone(),
-            &self.server.map,
+            &self.server.level,
             &texture_manager,
             surface_format,
             scene_width,
@@ -394,15 +417,18 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::MouseInput { state: mouse_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: mouse_state,
+                button,
+                ..
+            } => {
                 if mouse_state == ElementState::Released
                     && self.mouse_capture_mode == MouseCaptureMode::None
                 {
                     if let Some(state) = &self.state {
                         self.mouse_capture_mode =
                             Self::set_mouse_capture(state.window.as_ref(), true);
-                        self.ignore_next_motion =
-                            self.mouse_capture_mode != MouseCaptureMode::None;
+                        self.ignore_next_motion = self.mouse_capture_mode != MouseCaptureMode::None;
                     }
                 }
 
