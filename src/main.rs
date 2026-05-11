@@ -12,6 +12,7 @@ mod net;
 mod render_assembly;
 mod renderer;
 mod simulation;
+mod text_layer;
 mod texture;
 
 use app::App;
