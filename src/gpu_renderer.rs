@@ -113,10 +113,13 @@ pub struct SceneRenderer {
     ntsc_encode_bind_group: wgpu::BindGroup,
     ntsc_decode_bind_group: wgpu::BindGroup,
     blit_bind_group: wgpu::BindGroup,
+    overlay_bind_group: wgpu::BindGroup,
     scene_pipeline: wgpu::RenderPipeline,
     ntsc_encode_pipeline: wgpu::RenderPipeline,
     ntsc_decode_pipeline: wgpu::RenderPipeline,
     blit_pipeline: wgpu::RenderPipeline,
+    overlay_pipeline: wgpu::RenderPipeline,
+    overlay_texture: wgpu::Texture,
     scene_uniform_buffer: wgpu::Buffer,
     ntsc_encode_uniform_buffer: wgpu::Buffer,
     ntsc_decode_uniform_buffer: wgpu::Buffer,
@@ -282,6 +285,32 @@ impl SceneRenderer {
             view_formats: &[],
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let overlay_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("cpu_game_overlay"),
+            size: wgpu::Extent3d {
+                width: scene_width,
+                height: scene_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let overlay_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let overlay_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("cpu_game_overlay_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         let scene_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_scene_uniforms"),
@@ -459,6 +488,20 @@ impl SceneRenderer {
                 },
             ],
         });
+        let overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_overlay_bg"),
+            layout: &blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&overlay_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&overlay_sampler),
+                },
+            ],
+        });
 
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_scene_shader"),
@@ -608,6 +651,31 @@ impl SceneRenderer {
             multiview: None,
             cache: None,
         });
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_overlay_pipeline"),
+            layout: Some(&blit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &blit_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
 
         let (wall_vertices, wall_indices) = build_static_mesh(map, &atlas_rects, texture_manager);
         let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -637,10 +705,13 @@ impl SceneRenderer {
             ntsc_encode_bind_group,
             ntsc_decode_bind_group,
             blit_bind_group,
+            overlay_bind_group,
             scene_pipeline,
             ntsc_encode_pipeline,
             ntsc_decode_pipeline,
             blit_pipeline,
+            overlay_pipeline,
+            overlay_texture,
             scene_uniform_buffer,
             ntsc_encode_uniform_buffer,
             ntsc_decode_uniform_buffer,
@@ -664,6 +735,7 @@ impl SceneRenderer {
         billboards: &[RenderBillboard],
         anim_elapsed_ms: f64,
         _frame_number: u64,
+        overlay: Option<&[u8]>,
     ) {
         let view_proj = build_view_projection(camera, self.scene_width, self.scene_height);
         self.queue.write_buffer(
@@ -745,6 +817,46 @@ impl SceneRenderer {
             }
         }
 
+        if let Some(pixels) = overlay {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.overlay_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * self.scene_width),
+                    rows_per_image: Some(self.scene_height),
+                },
+                wgpu::Extent3d {
+                    width: self.scene_width,
+                    height: self.scene_height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_overlay_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cpu_game_ntsc_encode_pass"),
@@ -788,6 +900,7 @@ impl SceneRenderer {
         }
 
         let (vx, vy, vw, vh) = viewport;
+        {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("cpu_game_blit_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -807,6 +920,7 @@ impl SceneRenderer {
         pass.set_pipeline(&self.blit_pipeline);
         pass.set_bind_group(0, &self.blit_bind_group, &[]);
         pass.draw(0..3, 0..1);
+        }
     }
 
     pub fn calculate_aspect_preserving_viewport(

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use winit::event_loop::EventLoop;
 
 mod app;
+mod font;
 mod gpu_renderer;
 mod input;
 mod map;

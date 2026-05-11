@@ -14,6 +14,7 @@ use crate::model::PlayerId;
 use crate::net::server::Server;
 use crate::render_assembly;
 use crate::texture::TextureManager;
+use crate::font::Font;
 
 const TARGET_FPS: u64 = 60;
 
@@ -48,6 +49,8 @@ pub struct App {
     mouse_capture_mode: MouseCaptureMode,
     ignore_next_motion: bool,
     pending_fire: bool,
+    font: Font,
+    show_font_test: bool,
 }
 
 impl App {
@@ -73,6 +76,8 @@ impl App {
             mouse_capture_mode: MouseCaptureMode::None,
             ignore_next_motion: false,
             pending_fire: false,
+            font: Font::load(),
+            show_font_test: false,
         }
     }
 
@@ -194,6 +199,23 @@ impl App {
             state.renderer.scene_size().1,
         );
 
+        let overlay_buf: Option<Vec<u8>> = if self.show_font_test {
+            use crate::font::{FIRST_ASCII, FONT_COLS, FONT_ROWS, GLYPH_H, GLYPH_W};
+            let w = state.renderer.scene_size().0 as usize;
+            let h = state.renderer.scene_size().1 as usize;
+            let mut buf = vec![0u8; w * h * 4];
+            self.font.draw_text(&mut buf, w, h, "FONT TEST  (F4 TO TOGGLE)", 8, 8, [255, 255, 255]);
+            for row in 0..FONT_ROWS {
+                let start = FIRST_ASCII as u32 + (row * FONT_COLS) as u32;
+                let end = (start + FONT_COLS as u32).min(128);
+                let line: String = (start..end).filter_map(char::from_u32).collect();
+                self.font.draw_text(&mut buf, w, h, &line, 8, 32 + row * GLYPH_H, [255, 255, 255]);
+            }
+            Some(buf)
+        } else {
+            None
+        };
+
         state
             .renderer
             .render_frame(
@@ -204,6 +226,7 @@ impl App {
                 &scene.billboards,
                 self.anim_elapsed_ms,
                 self.current_tick,
+                overlay_buf.as_deref(),
             );
 
         state.renderer.queue.submit(std::iter::once(encoder.finish()));
@@ -353,6 +376,11 @@ impl ApplicationHandler for App {
                                 Some(winit::window::Fullscreen::Borderless(None))
                             });
                         }
+                        return;
+                    }
+
+                    if code == KeyCode::F4 && event.state == ElementState::Pressed {
+                        self.show_font_test = !self.show_font_test;
                         return;
                     }
 
