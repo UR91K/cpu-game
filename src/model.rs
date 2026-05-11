@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::texture::{AnimationStyle, FacingMode, FloorTexture, VisualId};
 
 pub type ControllerId = u64;
@@ -100,18 +101,6 @@ impl Level {
         }
         empty_tiles
     }
-}
-
-pub struct AoField {
-    pub width: usize,
-    pub height: usize,
-    pub corners: Vec<[u8; 4]>,
-}
-
-pub struct AoParameters {
-    pub corner_strength: f64,
-    pub wall_seam_strength: f64,
-    pub minimum_light: f64,
 }
 
 pub struct Waypoint {
