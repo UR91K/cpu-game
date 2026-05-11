@@ -55,13 +55,16 @@ impl Font {
         }
     }
 
-    /// Returns the glyph for `ch`, or `None` if outside the font's character range.
-    pub fn glyph(&self, ch: char) -> Option<&Glyph> {
+    /// Returns the glyph for `ch`, or for '?' if outside the font's character range.
+    pub fn glyph(&self, ch: char) -> &Glyph {
         let code = ch as u32;
-        if code < FIRST_ASCII as u32 {
-            return None;
-        }
-        self.glyphs.get((code - FIRST_ASCII as u32) as usize)
+        let idx = if code >= FIRST_ASCII as u32 && code < FIRST_ASCII as u32 + self.glyphs.len() as u32 {
+            (code - FIRST_ASCII as u32) as usize
+        } else {
+            // debug_assert!(false, "glyph out of range: {:?} (U+{:04X})", ch, code);
+            '?' as usize - FIRST_ASCII as usize
+        };
+        &self.glyphs[idx]
     }
 
     /// Draw `text` into an RGBA byte buffer (row-major, 4 bytes/pixel) at pixel
@@ -80,23 +83,24 @@ impl Font {
             if x + GLYPH_W > buf_width {
                 break;
             }
-            if let Some(glyph) = self.glyph(ch) {
-                for gy in 0..GLYPH_H {
-                    let py = y + gy;
-                    if py >= buf_height {
-                        break;
-                    }
-                    for gx in 0..GLYPH_W {
-                        if glyph.pixel(gx, gy) {
-                            let idx = (py * buf_width + x + gx) * 4;
-                            buf[idx] = color[0];
-                            buf[idx + 1] = color[1];
-                            buf[idx + 2] = color[2];
-                            buf[idx + 3] = 255;
-                        }
+            let glyph = self.glyph(ch); 
+            
+            for gy in 0..GLYPH_H {
+                let py = y + gy;
+                if py >= buf_height {
+                    break;
+                }
+                for gx in 0..GLYPH_W {
+                    if glyph.pixel(gx, gy) {
+                        let idx = (py * buf_width + x + gx) * 4;
+                        buf[idx] = color[0];
+                        buf[idx + 1] = color[1];
+                        buf[idx + 2] = color[2];
+                        buf[idx + 3] = 255;
                     }
                 }
             }
+            
             x += GLYPH_W;
         }
     }
