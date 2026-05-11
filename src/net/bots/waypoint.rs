@@ -1,3 +1,4 @@
+#![allow(unused)]
 use super::Controller;
 use crate::input::InputMessage;
 use crate::model::{ControllerId, Waypoint};
