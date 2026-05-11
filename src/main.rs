@@ -5,7 +5,7 @@ use winit::event_loop::EventLoop;
 
 mod app;
 mod font;
-mod gpu_renderer;
+mod renderer;
 mod input;
 mod level;
 mod model;

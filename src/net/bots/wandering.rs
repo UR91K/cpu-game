@@ -5,8 +5,6 @@ use crate::input::InputMessage;
 use crate::model::{ControllerId, Level, Waypoint};
 use crate::net::bots::{manhattan_distance, random_empty_waypoint};
 use crate::simulation::GameState;
-use rand::rng;
-use rand::seq::{IndexedRandom, SliceRandom};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::input::InputMessage;
-use crate::model::{ControllerId, Entity, EntityKind, Level, EntityId, PickupKind, RenderBody};
+use crate::model::{ControllerId, Entity, EntityId, EntityKind, Level, PickupKind, RenderBody};
 use crate::texture::{VisualId, visual_definition};
 
 pub const PLAYER_RADIUS: f64 = 0.2;
@@ -70,9 +70,7 @@ impl GameState {
                 vel_y: 0.0,
                 radius: PLAYER_RADIUS,
                 render: Some(render_body(VisualId::PlayerPawn)),
-                kind: EntityKind::Pawn {
-                    owner_id,
-                },
+                kind: EntityKind::Pawn { owner_id },
             },
         );
         id
@@ -116,7 +114,10 @@ impl GameState {
         id
     }
 
-    pub fn spawn_projectile_from_player(&mut self, controller_id: ControllerId) -> Option<EntityId> {
+    pub fn spawn_projectile_from_player(
+        &mut self,
+        controller_id: ControllerId,
+    ) -> Option<EntityId> {
         let player = self.players.get(&controller_id)?;
         let pawn = self.entities.get(&player.pawn_id)?;
         let dir_x = player.dir_x;

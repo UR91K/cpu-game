@@ -1,13 +1,8 @@
-use std::sync::Arc;
 
 use super::Controller;
-use crate::input::InputMessage;
-use crate::model::{ControllerId, Level, Waypoint};
-use crate::simulation::GameState;
-use rand::rng;
-use rand::seq::{IndexedRandom, SliceRandom};
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use crate::model::{Level, Waypoint};
+use rand::seq::IndexedRandom;
+
 
 pub mod wandering;
 pub mod waypoint;

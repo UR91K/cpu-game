@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::Controller;
-use crate::model::{ControllerId, Level, EntityId, PickupKind};
+use crate::model::{ControllerId, EntityId, Level, PickupKind};
 use crate::simulation::{GameState, Player, tick};
 
 pub struct Server {
@@ -20,7 +20,12 @@ impl Server {
     }
 
     /// add a controller and spawn its player at the given position
-    pub fn add_controller(&mut self, mut controller: Box<dyn Controller>, spawn_x: f64, spawn_y: f64) {
+    pub fn add_controller(
+        &mut self,
+        mut controller: Box<dyn Controller>,
+        spawn_x: f64,
+        spawn_y: f64,
+    ) {
         let id = controller.id();
         let pawn_id = self.state.spawn_pawn(spawn_x, spawn_y, Some(id));
         self.state.players.insert(id, Player::new(pawn_id));
@@ -67,7 +72,8 @@ impl Server {
     }
 
     pub fn spawn_wanderer(&mut self, id: ControllerId, x: f64, y: f64) {
-        let bot = crate::net::bots::wandering::WanderingController::new(id, Arc::clone(&self.level));
+        let bot =
+            crate::net::bots::wandering::WanderingController::new(id, Arc::clone(&self.level));
         self.add_controller(Box::new(bot), x, y);
     }
 }

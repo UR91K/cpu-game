@@ -9,11 +9,11 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::font::Font;
-use crate::gpu_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
 use crate::input::InputMessage;
 use crate::model::ControllerId;
 use crate::net::server::Server;
 use crate::render_assembly;
+use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
 use crate::texture::TextureManager;
 
 const TARGET_FPS: u64 = 60;
@@ -204,7 +204,7 @@ impl App {
         );
 
         let overlay_buf: Option<Vec<u8>> = if self.show_font_test {
-            use crate::font::{FIRST_ASCII, FONT_COLS, FONT_ROWS, GLYPH_H, GLYPH_W};
+            use crate::font::{FIRST_ASCII, FONT_COLS, FONT_ROWS, GLYPH_H};
             let w = state.renderer.scene_size().0 as usize;
             let h = state.renderer.scene_size().1 as usize;
             let mut buf = vec![0u8; w * h * 4];

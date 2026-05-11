@@ -1,13 +1,7 @@
-use std::sync::Arc;
-
 use super::Controller;
 use crate::input::InputMessage;
-use crate::model::{ControllerId, Level, Waypoint};
+use crate::model::{ControllerId, Waypoint};
 use crate::simulation::GameState;
-use rand::rng;
-use rand::seq::{IndexedRandom, SliceRandom};
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 
 pub struct WaypointController {
     pub id: ControllerId,
