@@ -21,7 +21,7 @@ use net::bot::WaypointBot;
 use net::client::LocalClient;
 use net::server::Server;
 
-use crate::net::bot::Waypoint;
+use crate::net::bot::{AStarBot, Waypoint};
 
 fn main() {
     let map = Arc::new(load_embedded_map());
@@ -40,15 +40,8 @@ fn main() {
     );
     server.add_client(Box::new(local_client), 21.0, 11.0);
 
-    let bot = WaypointBot::new(
-        2,
-        vec![
-            Waypoint { x: 21.0, y: 8.0 },
-            Waypoint { x: 15.0, y: 8.0 },
-            Waypoint { x: 15.0, y: 14.0 },
-            Waypoint { x: 21.0, y: 14.0 },
-        ],
-    );
+    let bot = AStarBot::new(HUMAN_ID + 1, Arc::clone(&map));
+    
     server.add_client(Box::new(bot), 18.0, 11.0);
 
     // server.spawn_static_prop(18.5, 9.5);

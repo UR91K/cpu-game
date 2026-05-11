@@ -75,6 +75,18 @@ impl Map {
     pub fn floor_at(&self, x: usize, y: usize) -> FloorTexture {
         self.floor_tiles[y][x]
     }
+
+    pub fn get_empty_tiles(&self) -> Vec<(usize, usize)> {
+    let mut empty_tiles = Vec::new();
+    for (y, row) in self.tiles.iter().enumerate() {
+        for (x, &tile) in row.iter().enumerate() {
+            if tile == 0 {
+                empty_tiles.push((x, y));
+            }
+        }
+    }
+    empty_tiles
+}
 }
 
 pub struct AoField {
