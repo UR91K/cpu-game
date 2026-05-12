@@ -15,6 +15,7 @@ mod model;
 mod net;
 mod render_assembly;
 mod renderer;
+mod runtime;
 mod simulation;
 mod text_layer;
 mod texture;
@@ -80,7 +81,12 @@ fn run_client() {
     let clock_manager = ClockManager::with_server(Arc::clone(&level), server);
 
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App::new(clock_manager, input_queue, HUMAN_ID, texture_manager);
+    let mut app = App::new(
+        Box::new(clock_manager),
+        input_queue,
+        HUMAN_ID,
+        texture_manager,
+    );
     event_loop.run_app(&mut app).unwrap();
 }
 
