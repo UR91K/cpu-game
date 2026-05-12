@@ -25,6 +25,7 @@
   <nav>
     <div class="nav-label">Contents</div>
     <a href="#overview">Overview</a>
+    <a href="#invariants">Design Invariants</a>
     <a href="#pipeline">Pipeline</a>
     <a href="#threads">Thread Architecture</a>
     <a href="#path-tracing">Acoustic Path Tracing</a>
@@ -32,10 +33,12 @@
     <a class="sub" href="#splitting">Reflection &amp; Transmission</a>
     <a class="sub" href="#arrivals">Arrival Classification</a>
     <a href="#allpass">Allpass Diffusion</a>
+    <a href="#examples">Worked Examples</a>
     <a href="#phenomena">Physical Phenomena</a>
     <a href="#materials">Materials</a>
     <a href="#params">Acoustic Params</a>
     <a href="#state">State Model</a>
+    <a href="#stability">Stability Controls</a>
     <a href="#ps1">PS1 Fidelity Simplifications</a>
     <a href="#non-goals">Non-Goals</a>
   </nav>
@@ -53,7 +56,32 @@
       </div>
     </section>
 
-    <!-- PIPELINE -->
+    <!-- DESIGN INVARIANTS -->
+    <section id="invariants">
+      <h2>Design Invariants</h2>
+      <p>These principles govern every design decision in this document. When in doubt about a tradeoff, these take precedence.</p>
+
+      <div class="callout">
+        <strong>The arrival set is the canonical acoustic output</strong>
+        The ray solve produces a set of arrivals. That set is the primary render representation. Nothing downstream summarises or collapses it into scalar fields that discard spatial identity.
+      </div>
+      <div class="callout">
+        <strong>Diffusion changes temporal character, not spatial ownership</strong>
+        An allpass chain smears an arrival in time. It does not merge that arrival with others or reassign its direction. Late diffuse energy stays bound to the arrival that generated it.
+      </div>
+      <div class="callout">
+        <strong>The tail is path-shaped, not listener-shaped</strong>
+        A reverb tail arriving from the doorway of a room should remain narrow and directional at the listener. A single shared tail bus would make it spatially diffuse, which is wrong. Per-arrival allpass chains follow from this directly — they are not a separate complexity bet.
+      </div>
+      <div class="callout">
+        <strong>Reduce work by tracing less, not by merging outcomes</strong>
+        Budget controls operate on the ray solve — fewer sources, fewer rays, skip conditions, energy thresholds. They do not operate on the output by collapsing distinct arrivals together after the fact.
+      </div>
+      <div class="callout">
+        <strong>Scalar summaries are diagnostics, not render primitives</strong>
+        <code>reverb_time</code> (RT60) may appear as an analysis metric or budgeting aid. It does not define the rendered tail. Fields that imply a single aggregate tail bus — such as <code>reverb_send</code> or <code>pre_delay</code> as top-level params — are not part of the model.
+      </div>
+    </section>
     <section id="pipeline">
       <h2>Pipeline</h2>
       <p>Three independent rates govern the system. They communicate via lock-free channels and atomically swapped structs — no rate ever blocks another.</p>
@@ -239,7 +267,7 @@
       <p>This approach is deterministic and produces no variance, which matters for a system updating at 16 Hz — Russian roulette termination would introduce jitter in the derived params.</p>
 
       <h3 id="arrivals">Arrival Classification</h3>
-      <p>Each arrival carries a <code>diffuse_bounces</code> count — the number of reflections off diffuse (rough) surfaces. This determines how the arrival is handled in the mix.</p>
+      <p>Each arrival carries a <code>diffuse_bounces</code> count — the number of reflections off diffuse (rough) surfaces. This is a rendering hint that determines how temporal smearing is applied, not a routing decision into a shared tail bus. All arrivals, including <code>DiffuseTail</code>, remain spatially independent and are mixed at their own direction and energy.</p>
 
 <pre><span class="kw">enum</span> <span class="ty">ArrivalKind</span> { Direct, EarlyReflection, LateReflection, DiffuseTail }
 
@@ -247,12 +275,15 @@
     <span class="kw">match</span> a.diffuse_bounces {
         <span class="nm">0</span>     =&gt; <span class="ty">ArrivalKind</span>::Direct,
         <span class="nm">1</span>     =&gt; <span class="ty">ArrivalKind</span>::EarlyReflection,
-        <span class="nm">2</span>..=<span class="nm">3</span> =&gt; <span class="ty">ArrivalKind</span>::LateReflection,   <span class="cm">// feed allpass chain</span>
-        _     =&gt; <span class="ty">ArrivalKind</span>::DiffuseTail,        <span class="cm">// fully into reverb tail</span>
+        <span class="nm">2</span>..=<span class="nm">3</span> =&gt; <span class="ty">ArrivalKind</span>::LateReflection,
+        <span class="cm">// DiffuseTail: temporal character fully smeared by allpass chain.</span>
+        <span class="cm">// Does NOT mean routed to a shared reverb bus — direction and energy</span>
+        <span class="cm">// are preserved. The tail is path-shaped, not listener-shaped.</span>
+        _     =&gt; <span class="ty">ArrivalKind</span>::DiffuseTail,
     }
 }</pre>
 
-      <p>Direct and early reflection arrivals are treated as discrete echoes with known delay and direction. Late reflection and diffuse tail arrivals are routed into the allpass diffusion chain. RT60 is derived from the arrival set directly — plot energy against delay time, fit an exponential decay, read off the time to reach -60dB.</p>
+      <p>RT60 can be derived from the arrival set as an analysis metric — plot energy against delay time across all arrivals, fit an exponential decay, read off the time to reach -60dB. This is useful for budgeting and debugging but is not the thing that drives the rendered tail.</p>
     </section>
 
     <!-- ALLPASS DIFFUSION -->
@@ -283,7 +314,31 @@
       </div>
     </section>
 
-    <!-- PHENOMENA -->
+    </section>
+
+    <!-- WORKED EXAMPLES -->
+    <section id="examples">
+      <h2>Worked Examples</h2>
+      <p>These examples demonstrate why the arrival-based model was chosen over collapsed parameter approaches. Both effects emerge from the ray solve with no special-casing — the geometry produces the right arrivals naturally.</p>
+
+      <h3>Large Room With Offset Doorway</h3>
+      <p>The listener is standing in a corridor. A large room is to their right, with a door several tiles away to the left. A sound source is inside the room.</p>
+      <p>The ray solve produces two distinct populations of arrivals:</p>
+      <p><strong>Through-wall arrivals</strong> — rays that transmit directly through the wall facing the listener. Each wall crossing compounds transmission loss and LPF. These arrivals are quiet, heavily low-passed, arrive from the direction of the wall (straight right), and carry no diffuse bounce history — no allpass smearing. They contribute a faint, muffled ghost of the source.</p>
+      <p><strong>Doorway arrivals</strong> — rays that exit through the open doorway, travel through open air, and reach the listener. These arrive from the direction of the door (to the left), at higher energy, lower LPF, and with whatever diffuse bounce history they accumulated bouncing around the room before exiting. They carry a reverberant tail that is directional — arriving from the left, not surrounding the listener.</p>
+      <p>Both populations land in the same arrival set. The audio thread mixes them simultaneously. The listener hears the muffled through-wall signal and the reverberant doorway signal at the same time, from different directions. This requires no zone detection, no portal graph, and no source position redirect — it falls out of the ray geometry.</p>
+      <p>A collapsed model (single redirected source position + shared reverb tail) cannot reproduce this. It can place the source at the doorway or at the wall, not both simultaneously.</p>
+
+      <h3>Spiral Room — Source at Centre</h3>
+      <p>The listener is outside a spiral-shaped room. The sound source is at the centre of the spiral.</p>
+      <p><strong>Through-wall arrivals</strong> — rays attempting to travel directly through the spiral walls accumulate compounding transmission loss with each layer. After two or three walls the energy drops below threshold and those branches die. The listener hears an extremely faint, heavily low-passed signal from the general direction of the source centre — barely audible.</p>
+      <p><strong>Corridor arrivals</strong> — rays that find their way through the spiral corridor travel a long winding path, bouncing off the inner and outer walls repeatedly. These walls are stone or concrete — diffuse, high absorption. By the time they exit the spiral opening, each such ray has accumulated several diffuse bounces, significant path length, and a fully populated per-arrival allpass chain. Critically, all rays that successfully navigate the spiral happen to exit through the same opening. Their directions therefore cluster — the listener hears them arriving from one focused direction.</p>
+      <p>Three properties of the corridor arrivals reinforce each other perceptually:</p>
+      <p><strong>Pre-delay</strong> — the long spiral path means significant travel time before any corridor arrival reaches the listener. The faint through-wall ghost arrives first; a moment later the reverberant tail arrives from the opening. The gap is a strong cue that the sound comes from somewhere spatially complex.</p>
+      <p><strong>Directional focus</strong> — all corridor exits are in the same place, so the reverb tail is narrow, arriving from the opening. It does not surround the listener. Hearing a spatially focused reverb tail correctly implies the listener is outside the reverberant space, not inside it.</p>
+      <p><strong>Allpass smearing</strong> — multiple diffuse bounces off absorptive walls produce dense per-arrival allpass chains. The tail is temporally smeared without being spatially spread. The listener hears blurred, muffled reverb from one direction.</p>
+      <p>None of this required detecting that the geometry is a spiral, finding the exit, or computing a bottleneck. The ray solve just cast rays and the physics produced the correct arrivals.</p>
+    </section>
     <section id="phenomena">
       <h2>Physical Phenomena</h2>
       <p>Assessment of each acoustic phenomenon for relevance in the tile-map model.</p>
@@ -401,7 +456,7 @@
     <!-- PARAMS -->
     <section id="params">
       <h2>Acoustic Params</h2>
-      <p>The output of one path trace cycle for a single source. Written by the acoustic thread, read by the audio thread. Describes "what treatment would be applied to any sound emitted from this entity's current position." Parameters are derived from the full arrival set rather than path statistics — the arrivals <em>are</em> the reverb.</p>
+      <p>The output of one path trace cycle for a single source. Written by the acoustic thread, read by the audio thread. The arrival set is the primary representation — everything the renderer needs is on the arrivals themselves. No top-level fields imply a single aggregate tail bus.</p>
       <p>Params are published via <code>arc-swap</code>, giving the audio thread wait-free reads at all times. Memory overhead is negligible given the struct size — the cost of keeping up to three live allocations per source is immaterial.</p>
 
 <pre><span class="kw">struct</span> <span class="ty">AcousticArrival</span> {
@@ -409,28 +464,26 @@
     energy:          <span class="ty">f32</span>,  <span class="cm">// compounded absorption along path</span>
     lpf:             <span class="ty">f32</span>,  <span class="cm">// accumulated low-pass mix (applied after allpass chain)</span>
     direction:       <span class="ty">Vec2</span>, <span class="cm">// arrival direction at listener — pan derived at mix time</span>
-    diffuse_bounces: <span class="ty">u32</span>,
+    diffuse_bounces: <span class="ty">u32</span>,  <span class="cm">// rendering hint: temporal smearing, not routing</span>
     <span class="cm">// per-arrival allpass chain built from this arrival's bounce history.</span>
-    <span class="cm">// spatial spread (diffusion) of the source is emergent from the full</span>
-    <span class="cm">// arrival set at mix time — it is not pre-summarised here.</span>
+    <span class="cm">// the tail is path-shaped: two arrivals from different paths through</span>
+    <span class="cm">// different materials have different chains. spatial identity is preserved.</span>
     allpass:         [<span class="ty">AllpassStage</span>; <span class="nm">3</span>],
 }
 
 <span class="kw">struct</span> <span class="ty">AcousticParams</span> {
-    <span class="cm">/// final volume after transmission + distance falloff</span>
-    volume:      <span class="ty">f32</span>,
-    <span class="cm">/// low-pass mix on the direct path (0 = dry, 1 = fully low-passed)</span>
-    lpf:         <span class="ty">f32</span>,
-    <span class="cm">/// RT60 fitted from arrival energy decay curve; capped at 3.0s</span>
-    reverb_time: <span class="ty">f32</span>,
-    <span class="cm">/// how much energy feeds into the diffuse reverb tail (0–1)</span>
-    reverb_send: <span class="ty">f32</span>,
-    <span class="cm">/// delay before reverb tail begins — delay of first diffuse arrival</span>
-    pre_delay:   <span class="ty">f32</span>,
-    <span class="cm">/// all arrivals — direct, early reflections, and late/diffuse.</span>
-    <span class="cm">/// pan and spatial diffusion are emergent from mixing these at their</span>
-    <span class="cm">/// individual directions and energies; neither is pre-computed.</span>
-    arrivals:    <span class="ty">Vec</span>&lt;<span class="ty">AcousticArrival</span>&gt;,
+    <span class="cm">/// overall source volume after distance falloff</span>
+    volume:         <span class="ty">f32</span>,
+
+    <span class="cm">/// the full arrival set — this is the render representation.</span>
+    <span class="cm">/// pan, spatial diffusion, reverb tail character, and pre-delay are all</span>
+    <span class="cm">/// emergent from mixing arrivals at their individual directions, energies,</span>
+    <span class="cm">/// delays, and allpass chains. nothing is pre-summarised here.</span>
+    arrivals:       <span class="ty">Vec</span>&lt;<span class="ty">AcousticArrival</span>&gt;,
+
+    <span class="cm">/// RT60 fitted from arrival energy decay curve — diagnostic / budgeting aid only.</span>
+    <span class="cm">/// this is not the thing that drives the rendered tail. capped at 3.0s.</span>
+    rt60_diagnostic: <span class="ty">f32</span>,
 }</pre>
     </section>
 
@@ -455,6 +508,47 @@
         .collect();
     next
 }</pre>
+    </section>
+
+    <!-- STABILITY CONTROLS -->
+    <section id="stability">
+      <h2>Stability Controls</h2>
+      <p>Budget guards are not optional. The acoustic thread must degrade gracefully under load without affecting the audio thread. All controls operate on the ray solve — they reduce tracing work. They do not operate on the output by collapsing or merging arrivals.</p>
+
+      <table class="prop-table">
+        <thead><tr><th>Control</th><th>Mechanism</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Max processing distance</td>
+            <td>Sources beyond a tile-distance threshold are skipped entirely. No arrivals are computed, existing params are left stale. Stale params at distance are inaudible.</td>
+          </tr>
+          <tr>
+            <td>Energy threshold pruning</td>
+            <td><code>MIN_ENERGY</code> gates both reflection and transmission branches during tracing. Branches below threshold are abandoned early. This is the primary cost control for dense geometry.</td>
+          </tr>
+          <tr>
+            <td>Per-source update throttling</td>
+            <td>Sources that have not moved significantly since the last trace can skip re-evaluation. A positional delta threshold determines what counts as significant. Stationary ambient sources may only need tracing once.</td>
+          </tr>
+          <tr>
+            <td>Source priority ordering</td>
+            <td>Within a 16 Hz budget cycle, closer sources are traced first. If the cycle runs long, distant sources are deferred to the next cycle rather than blocking the publish of nearer results.</td>
+          </tr>
+          <tr>
+            <td>Fixed ray and bounce counts</td>
+            <td>64 rays and 4 max bounces are hard limits, not tunable per-source. Predictable worst-case cost per source regardless of geometry.</td>
+          </tr>
+          <tr>
+            <td>Sound rate limiting</td>
+            <td>Rapidly repeating sounds of the same type from the same source (e.g. rapid footsteps) can reuse the most recent params rather than triggering a new trace. Params are position-derived, not sound-derived, so reuse is valid as long as position has not changed significantly.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>Lesson from prior art</strong>
+        The SoundPhysics Minecraft mod required explicit stability controls in production — processing distance limits, rate limiting, ambient sound skipping, and moving sound update throttling. These were not afterthoughts; they were necessary to keep the system well-behaved across the full range of in-game situations. This system needs the same from day one.
+      </div>
     </section>
 
     <!-- PS1 FIDELITY -->
