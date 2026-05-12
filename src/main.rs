@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use winit::event_loop::EventLoop;
 
 mod app;
+mod clock;
 mod font;
 mod input;
 mod level;
@@ -16,6 +17,7 @@ mod text_layer;
 mod texture;
 
 use app::App;
+use clock::ClockManager;
 use level::load_embedded_level;
 use model::PickupKind;
 use net::local_controller::LocalController;
@@ -44,7 +46,9 @@ fn main() {
     // server.spawn_static_prop(18.5, 9.5);
     server.spawn_pickup(15.5, 11.0, PickupKind::Medkit);
 
+    let clock_manager = ClockManager::with_server(Arc::clone(&level), server);
+
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App::new(server, input_queue, HUMAN_ID, texture_manager);
+    let mut app = App::new(clock_manager, input_queue, HUMAN_ID, texture_manager);
     event_loop.run_app(&mut app).unwrap();
 }

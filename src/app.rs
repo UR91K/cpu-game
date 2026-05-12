@@ -8,10 +8,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
+use crate::clock::ClockManager;
 use crate::font::Font;
 use crate::input::InputMessage;
 use crate::model::ControllerId;
-use crate::net::server::Server;
 use crate::render_assembly;
 use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
 use crate::text_layer::{HAlign, TextLayer, VAlign, place_text, place_text_at};
@@ -58,7 +58,7 @@ struct WindowState {
 
 pub struct App {
     state: Option<WindowState>,
-    server: Server,
+    clock_manager: ClockManager,
     input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
     human_id: ControllerId,
     keys: HashSet<KeyCode>,
@@ -80,14 +80,14 @@ pub struct App {
 
 impl App {
     pub fn new(
-        server: Server,
+        clock_manager: ClockManager,
         input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
         human_id: ControllerId,
         texture_manager: TextureManager,
     ) -> Self {
         Self {
             state: None,
-            server,
+            clock_manager,
             input_queue,
             human_id,
             keys: HashSet::new(),
@@ -170,7 +170,7 @@ impl App {
             rotate_delta: 0.0, // Mouse rotation is accumulated via device events; see below.
         };
         self.input_queue.lock().unwrap().push_back(msg);
-        self.server.tick(delta);
+        self.clock_manager.advance(delta);
     }
 
     fn push_rotation(&mut self, angle: f64) {
@@ -271,8 +271,12 @@ impl App {
     }
 
     fn render(&mut self) {
+        let Some(server_state) = self.clock_manager.server_state() else {
+            return;
+        };
+
         let scene = match render_assembly::assemble_scene(
-            &self.server.state,
+            server_state,
             self.human_id,
             self.fov_plane_len,
         ) {
@@ -364,7 +368,7 @@ impl App {
                 state.renderer = SceneRenderer::new(
                     state.renderer.device.clone(),
                     state.renderer.queue.clone(),
-                    &self.server.level,
+                    self.clock_manager.level(),
                     &state.texture_manager,
                     state.surface_config.format,
                     scene_width,
@@ -429,7 +433,7 @@ impl ApplicationHandler for App {
         let renderer = SceneRenderer::new(
             device.clone(),
             queue.clone(),
-            &self.server.level,
+            self.clock_manager.level(),
             &texture_manager,
             surface_format,
             scene_width,
