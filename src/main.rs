@@ -22,6 +22,7 @@ mod texture;
 
 use app::App;
 use clock::ClockManager;
+use input::LocalInputSink;
 use level::load_embedded_level;
 use model::{Level, PickupKind};
 use net::local_controller::LocalController;
@@ -79,11 +80,12 @@ fn run_client() {
     let server = build_local_server(Arc::clone(&level), Arc::clone(&input_queue), HUMAN_ID);
 
     let clock_manager = ClockManager::with_server(Arc::clone(&level), server);
+    let input_sink = LocalInputSink::new(input_queue);
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(
         Box::new(clock_manager),
-        input_queue,
+        Box::new(input_sink),
         HUMAN_ID,
         texture_manager,
     );

@@ -1,5 +1,5 @@
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
@@ -9,7 +9,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
 use crate::font::Font;
-use crate::input::InputMessage;
+use crate::input::{InputMessage, InputSink};
 use crate::model::ControllerId;
 use crate::render_assembly;
 use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
@@ -59,7 +59,7 @@ struct WindowState {
 pub struct App {
     state: Option<WindowState>,
     runtime: Box<dyn GameRuntime>,
-    input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
+    input_sink: Box<dyn InputSink>,
     human_id: ControllerId,
     keys: HashSet<KeyCode>,
     last_frame: Instant,
@@ -81,14 +81,14 @@ pub struct App {
 impl App {
     pub fn new(
         runtime: Box<dyn GameRuntime>,
-        input_queue: Arc<Mutex<VecDeque<InputMessage>>>,
+        input_sink: Box<dyn InputSink>,
         human_id: ControllerId,
         texture_manager: TextureManager,
     ) -> Self {
         Self {
             state: None,
             runtime,
-            input_queue,
+            input_sink,
             human_id,
             keys: HashSet::new(),
             last_frame: Instant::now(),
@@ -169,7 +169,7 @@ impl App {
             fire: std::mem::take(&mut self.pending_fire),
             rotate_delta: 0.0, // Mouse rotation is accumulated via device events; see below.
         };
-        self.input_queue.lock().unwrap().push_back(msg);
+        self.input_sink.submit(msg);
         self.runtime.advance(delta);
     }
 
@@ -182,7 +182,7 @@ impl App {
             rotate_delta: angle,
             ..Default::default()
         };
-        self.input_queue.lock().unwrap().push_back(msg);
+        self.input_sink.submit(msg);
     }
 
     fn build_hud(&mut self, _scene: &render_assembly::RenderScene) {
