@@ -201,13 +201,13 @@
 
     <span class="cm">// direct path first</span>
     trace_ray(map, source, (listener - source).normalize(),
-              listener, max_bounces, <span class="nm">1.0</span>, <span class="nm">0.0</span>, <span class="nm">0.0</span>, <span class="nm">0</span>, &amp;<span class="kw">mut</span> arrivals);
+              listener, max_bounces, <span class="nm">1.0</span>, <span class="nm">0.0</span>, <span class="nm">0.0</span>, <span class="nm">0</span>, <span class="ty">Default</span>::default(), &amp;<span class="kw">mut</span> arrivals);
 
     <span class="cm">// omnidirectional fan</span>
     <span class="kw">for</span> i <span class="kw">in</span> <span class="nm">0</span>..n_rays {
         <span class="kw">let</span> angle = (i <span class="kw">as</span> <span class="ty">f32</span> / n_rays <span class="kw">as</span> <span class="ty">f32</span>) * <span class="ty">TAU</span>;
         trace_ray(map, source, <span class="ty">Vec2</span>::from_angle(angle),
-                  listener, max_bounces, <span class="nm">1.0</span>, <span class="nm">0.0</span>, <span class="nm">0.0</span>, <span class="nm">0</span>, &amp;<span class="kw">mut</span> arrivals);
+                  listener, max_bounces, <span class="nm">1.0</span>, <span class="nm">0.0</span>, <span class="nm">0.0</span>, <span class="nm">0</span>, <span class="ty">Default</span>::default(), &amp;<span class="kw">mut</span> arrivals);
     }
 
     arrivals
@@ -223,6 +223,7 @@
     distance:     <span class="ty">f32</span>,
     lpf_acc:      <span class="ty">f32</span>,
     diffuse_bounces: <span class="ty">u32</span>,
+    allpass_acc:  [<span class="ty">AllpassStage</span>; <span class="nm">3</span>],  <span class="cm">// built inline; written to arrival on hit</span>
     arrivals:     &amp;<span class="kw">mut</span> <span class="ty">Vec</span>&lt;<span class="ty">AcousticArrival</span>&gt;,
 ) {
     <span class="kw">if</span> ray_passes_listener(origin, dir, listener, <span class="nm">LISTENER_RADIUS</span>) {
@@ -233,6 +234,7 @@
             lpf:             lpf_acc,
             direction:       dir,
             diffuse_bounces,
+            allpass:         allpass_acc,
         });
         <span class="kw">return</span>;
     }
@@ -249,16 +251,22 @@
             energy * mat.transmission, new_dist,
             <span class="cm">// compounds correctly: sequential walls each attenuate high frequencies</span>
             (lpf_acc + mat.transmission_lpf).min(<span class="nm">1.0</span>),
-            diffuse_bounces, arrivals);
+            diffuse_bounces, allpass_acc, arrivals);
     }
 
-    <span class="cm">// reflection branch</span>
+    <span class="cm">// reflection branch — allpass stage added here if surface is diffuse</span>
     <span class="kw">let</span> reflected_energy = energy * (<span class="nm">1.0</span> - mat.absorption);
     <span class="kw">if</span> reflected_energy &gt; <span class="nm">MIN_ENERGY</span> {
         <span class="kw">let</span> reflected_dir = reflect(dir, normal);
-        <span class="kw">let</span> new_diffuse = diffuse_bounces + mat.is_diffuse <span class="kw">as</span> <span class="ty">u32</span>;
+        <span class="kw">let</span> new_diffuse   = diffuse_bounces + mat.is_diffuse <span class="kw">as</span> <span class="ty">u32</span>;
+        <span class="kw">let</span> new_allpass   = <span class="kw">if</span> mat.is_diffuse {
+            push_allpass_stage(allpass_acc, <span class="ty">AllpassStage</span> {
+                delay_samples: (seg_dist / <span class="nm">SPEED_OF_SOUND</span> * <span class="nm">SAMPLE_RATE</span>) <span class="kw">as</span> <span class="ty">usize</span>,
+                feedback:      <span class="nm">1.0</span> - mat.absorption,
+            })
+        } <span class="kw">else</span> { allpass_acc };
         trace_ray(map, hit_pos, reflected_dir, listener, bounces_left - <span class="nm">1</span>,
-            reflected_energy, new_dist, lpf_acc, new_diffuse, arrivals);
+            reflected_energy, new_dist, lpf_acc, new_diffuse, new_allpass, arrivals);
     }
 }</pre>
 
@@ -292,17 +300,75 @@
       <p>Arrivals with two or more diffuse bounces have lost their discrete echo character and become part of the reverb tail. Rather than treating them as point arrivals, they are routed through a chain of allpass filters that smear energy in time without altering frequency content — matching what repeated diffuse reflections do physically.</p>
       <p>This is the same building block used in Schroeder and Freeverb reverbs, but here the chain parameters are derived from actual ray path geometry rather than being fixed constants tuned by ear. Crucially, the chain is built per-arrival and lives on <code>AcousticArrival</code> — each arrival carries its own allpass history from the specific surfaces it bounced off. Two arrivals that took different paths through different materials will have different chains even if they accumulate the same number of diffuse bounces.</p>
 
-<pre><span class="kw">struct</span> <span class="ty">AllpassStage</span> {
-    delay_samples: <span class="ty">usize</span>,  <span class="cm">// from segment length at that bounce point</span>
-    feedback:      <span class="ty">f32</span>,    <span class="cm">// from 1.0 - mat.absorption at that surface</span>
+      <h3>Construction During the Trace</h3>
+      <p>The allpass chain is built <em>inline during <code>trace_ray</code></em>, not post-hoc from a frozen struct. Segment geometry — the length and material of each bounce — is only available while the trace is executing and that wall hit is live on the stack. Once the arrival is pushed to the arrivals vec the per-segment data is gone; there is no <code>diffuse_segments</code> field on <code>AcousticArrival</code>. The chain accumulates as a parameter passed through the recursion alongside energy, distance, and lpf_acc:</p>
+
+<pre><span class="kw">fn</span> <span class="nm">trace_ray</span>(
+    map:             &amp;<span class="ty">TileMap</span>,
+    origin:          <span class="ty">Vec2</span>,
+    dir:             <span class="ty">Vec2</span>,
+    listener:        <span class="ty">Vec2</span>,
+    bounces_left:    <span class="ty">usize</span>,
+    energy:          <span class="ty">f32</span>,
+    distance:        <span class="ty">f32</span>,
+    lpf_acc:         <span class="ty">f32</span>,
+    diffuse_bounces: <span class="ty">u32</span>,
+    allpass_acc:     [<span class="ty">AllpassStage</span>; <span class="nm">3</span>],  <span class="cm">// accumulates inline, written to arrival</span>
+    arrivals:        &amp;<span class="kw">mut</span> <span class="ty">Vec</span>&lt;<span class="ty">AcousticArrival</span>&gt;,
+) {
+    <span class="kw">if</span> ray_passes_listener(origin, dir, listener, <span class="nm">LISTENER_RADIUS</span>) {
+        <span class="kw">let</span> total_dist = distance + dist_to_listener(origin, dir, listener);
+        arrivals.push(<span class="ty">AcousticArrival</span> {
+            delay:           total_dist / <span class="nm">SPEED_OF_SOUND</span>,
+            energy,
+            lpf:             lpf_acc,
+            direction:       dir,
+            diffuse_bounces,
+            allpass:         allpass_acc,  <span class="cm">// chain is complete, written once</span>
+        });
+        <span class="kw">return</span>;
+    }
+
+    <span class="kw">if</span> bounces_left == <span class="nm">0</span> || energy &lt; <span class="nm">MIN_ENERGY</span> { <span class="kw">return</span>; }
+
+    <span class="kw">let</span> <span class="ty">Some</span>((hit_pos, mat, normal)) = cast_to_wall(map, origin, dir) <span class="kw">else</span> { <span class="kw">return</span>; };
+    <span class="kw">let</span> seg_dist = (hit_pos - origin).length();
+    <span class="kw">let</span> new_dist  = distance + seg_dist;
+
+    <span class="cm">// transmission branch</span>
+    <span class="kw">if</span> energy * mat.transmission &gt; <span class="nm">MIN_ENERGY</span> {
+        trace_ray(map, hit_pos, dir, listener, bounces_left,
+            energy * mat.transmission, new_dist,
+            (lpf_acc + mat.transmission_lpf).min(<span class="nm">1.0</span>),
+            diffuse_bounces, allpass_acc, arrivals);
+    }
+
+    <span class="cm">// reflection branch — if diffuse, add a stage to the allpass accumulator</span>
+    <span class="kw">let</span> reflected_energy = energy * (<span class="nm">1.0</span> - mat.absorption);
+    <span class="kw">if</span> reflected_energy &gt; <span class="nm">MIN_ENERGY</span> {
+        <span class="kw">let</span> reflected_dir  = reflect(dir, normal);
+        <span class="kw">let</span> new_diffuse    = diffuse_bounces + mat.is_diffuse <span class="kw">as</span> <span class="ty">u32</span>;
+        <span class="kw">let</span> new_allpass    = <span class="kw">if</span> mat.is_diffuse {
+            push_allpass_stage(allpass_acc, <span class="ty">AllpassStage</span> {
+                <span class="cm">// segment length at this bounce → delay time for this stage</span>
+                delay_samples: (seg_dist / <span class="nm">SPEED_OF_SOUND</span> * <span class="nm">SAMPLE_RATE</span>) <span class="kw">as</span> <span class="ty">usize</span>,
+                <span class="cm">// surface absorption → feedback coefficient</span>
+                feedback:      <span class="nm">1.0</span> - mat.absorption,
+            })
+        } <span class="kw">else</span> {
+            allpass_acc
+        };
+        trace_ray(map, hit_pos, reflected_dir, listener, bounces_left - <span class="nm">1</span>,
+            reflected_energy, new_dist, lpf_acc, new_diffuse, new_allpass, arrivals);
+    }
 }
 
-<span class="kw">fn</span> <span class="nm">build_allpass_chain</span>(arrival: &amp;<span class="ty">AcousticArrival</span>) -&gt; [<span class="ty">AllpassStage</span>; <span class="nm">3</span>] {
-    <span class="cm">// one stage per diffuse bounce segment, capped at 3</span>
-    arrival.diffuse_segments.iter().take(<span class="nm">3</span>).map(|seg| <span class="ty">AllpassStage</span> {
-        delay_samples: (seg.length / <span class="nm">SPEED_OF_SOUND</span> * <span class="nm">SAMPLE_RATE</span>) <span class="kw">as</span> <span class="ty">usize</span>,
-        feedback:      <span class="nm">1.0</span> - seg.material.absorption,
-    }).collect::&lt;[_; <span class="nm">3</span>]&gt;()
+<span class="cm">// pushes a stage into the fixed-size accumulator, shifting out the oldest if full</span>
+<span class="kw">fn</span> <span class="nm">push_allpass_stage</span>(
+    acc:   [<span class="ty">AllpassStage</span>; <span class="nm">3</span>],
+    stage: <span class="ty">AllpassStage</span>,
+) -&gt; [<span class="ty">AllpassStage</span>; <span class="nm">3</span>] {
+    [acc[<span class="nm">1</span>], acc[<span class="nm">2</span>], stage]
 }</pre>
 
       <p>The LPF accumulated along the ray path is applied <em>after</em> the allpass chain, not before. The allpass stages process the input signal before frequency shaping — applying LPF to the input would incorrectly filter the signal feeding the delay buffers, altering the diffusion character.</p>
