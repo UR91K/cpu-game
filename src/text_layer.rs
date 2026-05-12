@@ -18,6 +18,7 @@ pub struct TextLayer {
     cells: Vec<Option<Cell>>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HAlign {
     Left,
@@ -25,6 +26,7 @@ pub enum HAlign {
     Right,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VAlign {
     Top,
@@ -62,6 +64,7 @@ impl TextLayer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self, col: usize, row: usize) {
         if let Some(index) = self.index(col, row) {
             self.cells[index] = None;
@@ -152,6 +155,7 @@ pub fn place_text(
     }
 }
 
+#[allow(dead_code)]
 pub fn wrap_text(text: &str, max_cols: usize) -> Vec<String> {
     if max_cols == 0 {
         return Vec::new();

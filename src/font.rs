@@ -69,6 +69,7 @@ impl Font {
 
     /// Draw `text` into an RGBA byte buffer (row-major, 4 bytes/pixel) at pixel
     /// position (`x`, `y`). Lit pixels are written in `color`; dark pixels are skipped.
+    #[allow(dead_code)]
     pub fn draw_text(
         &self,
         buf: &mut [u8],

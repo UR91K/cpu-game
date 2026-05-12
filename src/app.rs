@@ -14,9 +14,36 @@ use crate::model::ControllerId;
 use crate::net::server::Server;
 use crate::render_assembly;
 use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
+use crate::text_layer::{Cell, HAlign, TextLayer, VAlign, place_text};
 use crate::texture::TextureManager;
 
 const TARGET_FPS: u64 = 60;
+
+fn rgba_from_hex_str(hex: &str, alpha: u8) -> [u8; 4] {
+    let hex = hex.trim_start_matches('#');
+    let (r, g, b) = match hex.len() {
+        3 => {
+            let [r, g, b] = [0, 1, 2].map(|i| {
+                let nibble = u8::from_str_radix(&hex[i..i + 1], 16).unwrap();
+                nibble << 4 | nibble
+            });
+            (r, g, b)
+        }
+        6 | 8 => {
+            let [r, g, b] = [0, 2, 4].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap());
+            (r, g, b)
+        }
+        _ => panic!("invalid hex color: #{hex}"),
+    };
+
+    let a = if hex.len() == 8 {
+        u8::from_str_radix(&hex[6..8], 16).unwrap()
+    } else {
+        alpha
+    };
+
+    [r, g, b, a]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MouseCaptureMode {
@@ -50,7 +77,9 @@ pub struct App {
     ignore_next_motion: bool,
     pending_fire: bool,
     font: Font,
+    text_layer: TextLayer,
     show_font_test: bool,
+    show_debug_info: bool,
 }
 
 impl App {
@@ -77,7 +106,9 @@ impl App {
             ignore_next_motion: false,
             pending_fire: false,
             font: Font::load(),
+            text_layer: TextLayer::new(SCENE_WIDTH, SCENE_HEIGHT),
             show_font_test: false,
+            show_debug_info: false,
         }
     }
 
@@ -158,11 +189,96 @@ impl App {
         self.input_queue.lock().unwrap().push_back(msg);
     }
 
-    fn render(&mut self) {
-        let Some(state) = &mut self.state else {
-            return;
+    fn build_hud(&mut self, _scene: &render_assembly::RenderScene) {
+        let bottom_row = self.text_layer.rows.saturating_sub(1);
+        let above_bottom_row = bottom_row.saturating_sub(1);
+
+        let controls = "ESC CAPTURE  WASD MOVE  SPACE/LMB FIRE  F4 FONT  F11 FULLSCREEN";
+        let test = "Meow! Test Test Test";
+
+        let controls_col = self.text_layer.cols.saturating_sub(controls.chars().count()) / 2;
+        let test_col = self.text_layer.cols.saturating_sub(test.chars().count()) / 2;
+
+        Self::write_text_line(
+            &mut self.text_layer,
+            controls_col,
+            bottom_row,
+            controls,
+            rgba_from_hex_str("#DCDCDA", 255),
+            rgba_from_hex_str("#000000", 140),
+        );
+
+        Self::write_text_line(
+            &mut self.text_layer,
+            test_col,
+            above_bottom_row,
+            test,
+            rgba_from_hex_str("#f00cca", 255),
+            rgba_from_hex_str("#23c9f3", 140),
+        );
+    }
+    
+    fn build_debug_overlay(&mut self, scene: &render_assembly::RenderScene) {
+        let fg = [255, 255, 255, 255];
+        let bg = [0, 0, 0, 160];
+        let capture = match self.mouse_capture_mode {
+            MouseCaptureMode::None => "FREE",
+            MouseCaptureMode::Locked => "LOCK",
+            MouseCaptureMode::ConfinedWarp => "WARP",
         };
 
+        let status = format!(
+            "TICK {:05}  POS {:.1},{:.1}  SPR {:02}  MOUSE {}",
+            self.current_tick,
+            scene.camera.x,
+            scene.camera.y,
+            scene.billboards.len(),
+            capture,
+        );
+        Self::write_text_line(&mut self.text_layer, 1, 1, &status, fg, bg);
+    }
+
+    fn build_font_test_overlay(&mut self) {
+        use crate::font::{FIRST_ASCII, FONT_COLS, FONT_ROWS};
+
+        place_text(
+            &mut self.text_layer,
+            "FONT TEST  (F4 TO TOGGLE)",
+            HAlign::Center,
+            VAlign::Top,
+            [255, 255, 255, 255],
+            [0, 0, 0, 180],
+        );
+
+        for row in 0..FONT_ROWS {
+            let start = FIRST_ASCII as u32 + (row * FONT_COLS) as u32;
+            let end = (start + FONT_COLS as u32).min(128);
+            let line: String = (start..end).filter_map(char::from_u32).collect();
+            Self::write_text_line(
+                &mut self.text_layer,
+                1,
+                row + 3,
+                &line,
+                [255, 255, 255, 255],
+                [0, 0, 0, 0],
+            );
+        }
+    }
+
+    fn write_text_line(
+        layer: &mut TextLayer,
+        col: usize,
+        row: usize,
+        text: &str,
+        fg: [u8; 4],
+        bg: [u8; 4],
+    ) {
+        for (index, glyph) in text.chars().enumerate() {
+            layer.set(col + index, row, Cell { glyph, fg, bg });
+        }
+    }
+
+    fn render(&mut self) {
         let scene = match render_assembly::assemble_scene(
             &self.server.state,
             self.human_id,
@@ -170,6 +286,31 @@ impl App {
         ) {
             Some(scene) => scene,
             None => return,
+        };
+
+        if let Some(state) = &self.state {
+            let scene_size = state.renderer.scene_size();
+            let expected_size = (scene_size.0 as usize, scene_size.1 as usize);
+            if self.text_layer.scene_size() != expected_size {
+                self.text_layer = TextLayer::new(scene_size.0, scene_size.1);
+            }
+        }
+
+        self.text_layer.clear_all();
+        if self.show_font_test {
+            self.build_font_test_overlay();
+        } else {
+            self.build_hud(&scene);
+            if self.show_debug_info {
+                self.build_debug_overlay(&scene);
+            }
+        }
+        let (overlay_width, overlay_height) = self.text_layer.scene_size();
+        let mut overlay_buf = vec![0u8; overlay_width * overlay_height * 4];
+        self.text_layer.render_to_buf(&mut overlay_buf, &self.font);
+
+        let Some(state) = &mut self.state else {
+            return;
         };
 
         let output = match state.surface.get_current_texture() {
@@ -203,39 +344,6 @@ impl App {
             state.renderer.scene_size().1,
         );
 
-        let overlay_buf: Option<Vec<u8>> = if self.show_font_test {
-            use crate::font::{FIRST_ASCII, FONT_COLS, FONT_ROWS, GLYPH_H};
-            let w = state.renderer.scene_size().0 as usize;
-            let h = state.renderer.scene_size().1 as usize;
-            let mut buf = vec![0u8; w * h * 4];
-            self.font.draw_text(
-                &mut buf,
-                w,
-                h,
-                "FONT TEST  (F4 TO TOGGLE)",
-                8,
-                8,
-                [255, 255, 255],
-            );
-            for row in 0..FONT_ROWS {
-                let start = FIRST_ASCII as u32 + (row * FONT_COLS) as u32;
-                let end = (start + FONT_COLS as u32).min(128);
-                let line: String = (start..end).filter_map(char::from_u32).collect();
-                self.font.draw_text(
-                    &mut buf,
-                    w,
-                    h,
-                    &line,
-                    8,
-                    32 + row * GLYPH_H,
-                    [255, 255, 255],
-                );
-            }
-            Some(buf)
-        } else {
-            None
-        };
-
         state.renderer.render_frame(
             &mut encoder,
             &view,
@@ -244,7 +352,7 @@ impl App {
             &scene.billboards,
             self.anim_elapsed_ms,
             self.current_tick,
-            overlay_buf.as_deref(),
+            Some(overlay_buf.as_slice()),
         );
 
         state
@@ -270,6 +378,7 @@ impl App {
                     scene_width,
                     SCENE_HEIGHT,
                 );
+                self.text_layer = TextLayer::new(scene_width, SCENE_HEIGHT);
                 state
                     .surface
                     .configure(&state.renderer.device, &state.surface_config);
@@ -334,6 +443,7 @@ impl ApplicationHandler for App {
             scene_width,
             SCENE_HEIGHT,
         );
+        self.text_layer = TextLayer::new(scene_width, SCENE_HEIGHT);
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -404,6 +514,11 @@ impl ApplicationHandler for App {
 
                     if code == KeyCode::F4 && event.state == ElementState::Pressed {
                         self.show_font_test = !self.show_font_test;
+                        return;
+                    }
+
+                    if code == KeyCode::F3 && event.state == ElementState::Pressed {
+                        self.show_debug_info = !self.show_debug_info;
                         return;
                     }
 
