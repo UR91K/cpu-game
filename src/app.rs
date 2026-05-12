@@ -271,12 +271,12 @@ impl App {
     }
 
     fn render(&mut self) {
-        let Some(game_state) = self.runtime.game_state() else {
+        let Some(game_state) = self.runtime.snapshot() else {
             return;
         };
 
         let scene = match render_assembly::assemble_scene(
-            game_state,
+            &game_state,
             self.human_id,
             self.fov_plane_len,
         ) {
