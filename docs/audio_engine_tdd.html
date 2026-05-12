@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Audio Engine — Technical Design Document</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+
+  :root {
+    --bg: #0e0f11;
+    --bg2: #13151a;
+    --bg3: #1c1f27;
+    --border: #2a2d36;
+    --accent: #4af0a0;
+    --accent2: #4ab0f0;
+    --accent3: #f0a04a;
+    --muted: #5a6070;
+    --text: #c8cdd8;
+    --text-bright: #e8ecf4;
+    --danger: #f05a5a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 0 0 80px 0;
+  }
+
+  /* ── header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 48px 64px 40px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 24px;
+  }
+
+  .doc-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  header h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  header h1 span {
+    color: var(--accent);
+  }
+
+  .doc-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.8;
+  }
+
+  /* ── layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 64px;
+    gap: 64px;
+    align-items: start;
+  }
+
+  /* ── nav ── */
+  nav {
+    position: sticky;
+    top: 32px;
+    padding-top: 40px;
+  }
+
+  nav .nav-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  nav a {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 5px 0 5px 12px;
+    border-left: 1px solid var(--border);
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  nav a:hover {
+    color: var(--text);
+    border-left-color: var(--accent);
+  }
+
+  nav a.sub {
+    padding-left: 24px;
+    font-size: 11px;
+  }
+
+  /* ── content ── */
+  .content {
+    padding-top: 40px;
+  }
+
+  section {
+    margin-bottom: 64px;
+    padding-bottom: 64px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  section:last-child {
+    border-bottom: none;
+  }
+
+  h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  h2::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  h3 {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 32px 0 10px;
+  }
+
+  h3:first-of-type {
+    margin-top: 0;
+  }
+
+  p {
+    color: var(--text);
+    margin-bottom: 14px;
+    max-width: 680px;
+  }
+
+  /* ── pipeline diagram ── */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 28px 0;
+    overflow-x: auto;
+  }
+
+  .pipe-stage {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 16px 18px;
+    flex: 1;
+    min-width: 130px;
+  }
+
+  .pipe-stage:first-child { border-radius: 4px 0 0 4px; }
+  .pipe-stage:last-child { border-radius: 0 4px 4px 0; }
+
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--muted);
+    font-size: 18px;
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+
+  .pipe-stage .stage-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 6px;
+  }
+
+  .pipe-stage .stage-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 6px;
+  }
+
+  .pipe-stage .stage-rate {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--accent3);
+  }
+
+  .pipe-stage .stage-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  /* ── code blocks ── */
+  pre {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 4px 4px 0;
+    padding: 20px 24px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text);
+    overflow-x: auto;
+    margin: 16px 0 24px;
+  }
+
+  .kw  { color: var(--accent2); }
+  .ty  { color: var(--accent3); }
+  .cm  { color: var(--muted); font-style: italic; }
+  .st  { color: var(--accent); }
+  .nm  { color: #c9a8f5; }
+
+  /* ── property table ── */
+  .prop-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 13px;
+  }
+
+  .prop-table th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: 8px 16px 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .prop-table td {
+    padding: 10px 16px 10px 0;
+    border-bottom: 1px solid var(--bg3);
+    vertical-align: top;
+    color: var(--text);
+  }
+
+  .prop-table td:first-child {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-bright);
+    white-space: nowrap;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    margin-right: 4px;
+  }
+
+  .tag-must   { background: #1a3a2a; color: var(--accent); border: 1px solid #2a5a3a; }
+  .tag-should { background: #1a2a3a; color: var(--accent2); border: 1px solid #2a4a5a; }
+  .tag-ignore { background: #2a2a2a; color: var(--muted); border: 1px solid var(--border); }
+
+  /* ── decision callout ── */
+  .callout {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent3);
+    border-radius: 0 4px 4px 0;
+    padding: 16px 20px;
+    margin: 20px 0;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+
+  .callout strong {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent3);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  /* ── thread diagram ── */
+  .threads {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  .thread-box {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+  }
+
+  .thread-box .thread-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .thread-box .thread-rate {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  .thread-box ul {
+    list-style: none;
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .thread-box ul li::before {
+    content: '→ ';
+    color: var(--border);
+  }
+
+  .thread-game   { border-top: 2px solid var(--accent3); }
+  .thread-game   .thread-name { color: var(--accent3); }
+  .thread-game   .thread-rate { color: var(--accent3); }
+
+  .thread-acoustic { border-top: 2px solid var(--accent2); }
+  .thread-acoustic .thread-name { color: var(--accent2); }
+  .thread-acoustic .thread-rate { color: var(--accent2); }
+
+  .thread-audio  { border-top: 2px solid var(--accent); }
+  .thread-audio  .thread-name { color: var(--accent); }
+  .thread-audio  .thread-rate { color: var(--accent); }
+
+  /* ── material grid ── */
+  .material-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+
+  .material-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 16px;
+  }
+
+  .material-card .mat-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 10px;
+  }
+
+  .mat-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .mat-bar-label { color: var(--muted); width: 70px; flex-shrink: 0; }
+
+  .mat-bar-track {
+    flex: 1;
+    height: 4px;
+    background: var(--bg3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .mat-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent2);
+  }
+
+  .mat-bar-fill.tx { background: var(--accent); }
+  .mat-bar-fill.lp { background: var(--accent3); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="doc-label">Technical Design Document</div>
+    <h1>2D Tile-Map <span>Acoustic Engine</span></h1>
+  </div>
+  <div class="doc-meta">
+    Status: Draft<br>
+    Platform: Rust / wgpu<br>
+    Audio: rodio / cpal
+  </div>
+</header>
+
+<div class="layout">
+
+  <nav>
+    <div class="nav-label">Contents</div>
+    <a href="#overview">Overview</a>
+    <a href="#pipeline">Pipeline</a>
+    <a href="#threads">Thread Architecture</a>
+    <a href="#path-tracing">Acoustic Path Tracing</a>
+    <a class="sub" href="#path-tracing">DDA Traversal</a>
+    <a class="sub" href="#bfs">BFS Routing</a>
+    <a class="sub" href="#bounces">Bounce Rays</a>
+    <a href="#phenomena">Physical Phenomena</a>
+    <a href="#materials">Materials</a>
+    <a href="#params">Acoustic Params</a>
+    <a href="#state">State Model</a>
+    <a href="#non-goals">Non-Goals</a>
+  </nav>
+
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>This document describes the design of the spatial audio engine for a 2D tile-map game rendered with wgpu. The engine approximates physically plausible room acoustics using runtime 2D path tracing on the CPU, decoupled from both the game simulation and audio mixing threads.</p>
+      <p>The map is static at runtime, which simplifies the acoustic problem: tile materials and topology never change, so path tracing results are stable between updates and can be updated lazily at 10–15 Hz without perceptible degradation.</p>
+      <div class="callout">
+        <strong>Key Decision</strong>
+        The static map was considered for offline bake / precomputed probe grids, but arbitrary geometry (spirals, mazes, irregular rooms) makes dense probe grids equivalent in cost to runtime path tracing with worse generality. Runtime path tracing on a dedicated CPU thread was chosen as simpler, more correct, and well within the available CPU budget (Ryzen 5 3600 at ~0.6% baseline utilisation).
+      </div>
+    </section>
+
+    <!-- PIPELINE -->
+    <section id="pipeline">
+      <h2>Pipeline</h2>
+      <p>Three independent rates govern the system. They communicate via lock-free channels and atomically swapped structs — no rate ever blocks another.</p>
+
+      <div class="pipeline">
+        <div class="pipe-stage">
+          <div class="stage-label">Game Thread</div>
+          <div class="stage-title">Sim Tick</div>
+          <div class="stage-rate">64 Hz</div>
+          <div class="stage-desc">Emits SoundEvents when entities produce sounds. Writes latest entity positions.</div>
+        </div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-stage">
+          <div class="stage-label">Acoustic Thread</div>
+          <div class="stage-title">Path Trace</div>
+          <div class="stage-rate">10–15 Hz</div>
+          <div class="stage-desc">Reads positions, traces paths through tile map, writes AcousticParams per source.</div>
+        </div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-stage">
+          <div class="stage-label">Audio Thread</div>
+          <div class="stage-title">cpal Callback</div>
+          <div class="stage-rate">~44100 Hz</div>
+          <div class="stage-desc">Reads latest params (non-blocking). Applies volume, pan, LPF. Rodio mixer fills sample buffer.</div>
+        </div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-stage">
+          <div class="stage-label">Hardware</div>
+          <div class="stage-title">Speakers</div>
+          <div class="stage-rate">Continuous</div>
+          <div class="stage-desc">cpal hands the filled buffer to the OS audio API (WASAPI / CoreAudio / ALSA).</div>
+        </div>
+      </div>
+
+      <p>Sound events travel from the game thread directly to the audio thread via a lock-free channel, bypassing the acoustic thread entirely. This means sounds play immediately — the acoustic thread only governs the <em>treatment</em> applied to already-playing sounds, not whether they play at all.</p>
+    </section>
+
+    <!-- THREADS -->
+    <section id="threads">
+      <h2>Thread Architecture</h2>
+
+      <div class="threads">
+        <div class="thread-box thread-game">
+          <div class="thread-name">Game Thread</div>
+          <div class="thread-rate">64 Hz</div>
+          <ul>
+            <li>Runs sim tick (pure function)</li>
+            <li>Detects sound-emitting events</li>
+            <li>Pushes SoundEvent to audio channel</li>
+            <li>Writes entity positions to shared slot</li>
+          </ul>
+        </div>
+        <div class="thread-box thread-acoustic">
+          <div class="thread-name">Acoustic Thread</div>
+          <div class="thread-rate">10–15 Hz</div>
+          <ul>
+            <li>Reads entity positions</li>
+            <li>Reads listener position / orientation</li>
+            <li>DDA + BFS path trace per source</li>
+            <li>Writes AcousticParams to atomic slot</li>
+            <li>Sleeps between update cycles</li>
+          </ul>
+        </div>
+        <div class="thread-box thread-audio">
+          <div class="thread-name">Audio Thread</div>
+          <div class="thread-rate">~44100 Hz (cpal)</div>
+          <ul>
+            <li>Drains SoundEvent channel</li>
+            <li>Spawns/stops Sinks in pool</li>
+            <li>Reads latest AcousticParams</li>
+            <li>Applies volume / pan / LPF</li>
+            <li>Rodio mixer → cpal buffer fill</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Shared State</h3>
+<pre><span class="kw">struct</span> <span class="ty">SharedAcousticState</span> {
+    <span class="cm">// written by acoustic thread, read by audio thread</span>
+    <span class="cm">// one slot per active source — AtomicCell is a memcopy, never blocks</span>
+    params: [<span class="ty">AtomicCell</span>&lt;<span class="ty">AcousticParams</span>&gt;; <span class="nm">MAX_SOURCES</span>],
+}
+
+<span class="kw">struct</span> <span class="ty">SoundEvent</span> {
+    entity_id: <span class="ty">EntityId</span>,
+    sound:     <span class="ty">SoundId</span>,
+    position:  <span class="ty">Vec2</span>,
+    volume:    <span class="ty">f32</span>,
+}</pre>
+
+      <p>Stale acoustic params on the audio thread (up to ~100ms behind) are imperceptible. Acoustic parameters change only as the listener or source moves through space — at normal movement speeds the perceptible change between 10Hz updates is negligible.</p>
+    </section>
+
+    <!-- PATH TRACING -->
+    <section id="path-tracing">
+      <h2>Acoustic Path Tracing</h2>
+      <p>The core acoustic calculation is 2D path tracing on the tile grid — conceptually analogous to light transport but with different physical rules. The tile map provides free axis-aligned wall normals, uniform wall thickness, and discrete material lookup, all of which simplify the implementation significantly.</p>
+
+      <h3>DDA Direct Path</h3>
+      <p>For each active sound source, a DDA ray is cast from the source position to the listener. Each wall tile traversed accumulates absorption and low-pass mix. If the direct path is unoccluded and transmission energy remains above threshold, no further tracing is needed.</p>
+
+<pre><span class="kw">fn</span> <span class="nm">trace_direct</span>(map: &amp;<span class="ty">TileMap</span>, from: <span class="ty">Vec2</span>, to: <span class="ty">Vec2</span>) -&gt; <span class="ty">DirectPath</span> {
+    <span class="kw">let mut</span> transmission = <span class="nm">1.0f32</span>;
+    <span class="kw">let mut</span> lpf_mix      = <span class="nm">0.0f32</span>;
+
+    <span class="kw">for</span> tile <span class="kw">in</span> dda(from, to) {
+        <span class="kw">if let</span> <span class="ty">Tile::Wall</span>(mat) = map.get(tile) {
+            transmission *= mat.transmission;
+            lpf_mix       = (lpf_mix + mat.transmission_lpf).min(<span class="nm">1.0</span>);
+            <span class="kw">if</span> transmission &lt; <span class="nm">0.01</span> { <span class="kw">break</span>; } <span class="cm">// below audibility threshold</span>
+        }
+    }
+
+    <span class="ty">DirectPath</span> { transmission, lpf_mix }
+}</pre>
+
+      <h3 id="bfs">BFS Indirect Path Routing</h3>
+      <p>When the direct DDA path is fully occluded, or the source is in geometrically complex space (spiral room, maze), a BFS is run on the open-tile graph weighted by inverse local width. This finds the path sound would naturally travel — through corridors, around corners, via the least resistive route — regardless of map shape.</p>
+      <p>The narrowest point on the found path becomes the <strong>acoustic bottleneck</strong> — the re-emission point from which the sound appears to arrive at the listener. This correctly reproduces the "focused reverb from a doorway" effect without requiring precomputed portal graphs.</p>
+
+<pre><span class="kw">fn</span> <span class="nm">find_acoustic_bottleneck</span>(
+    map:  &amp;<span class="ty">TileMap</span>,
+    from: <span class="ty">Vec2</span>,
+    to:   <span class="ty">Vec2</span>,
+) -&gt; <span class="ty">Option</span>&lt;<span class="ty">Vec2</span>&gt; {
+    <span class="cm">// walk BFS path; find tile with minimum open neighbour count</span>
+    bfs_path(map, from, to)?
+        .into_iter()
+        .min_by_key(|&amp;tile| count_open_neighbors(map, tile))
+        .map(|tile| tile.center())
+}</pre>
+
+      <h3 id="bounces">Early Reflection Bounce Rays</h3>
+      <p>Up to 2 specular bounce rays are cast from the source to find indirect reflection paths. Wall normals are always axis-aligned on a tile map, so the reflection direction is trivial to compute. Material diffusion determines whether a bounce produces a discrete early echo or feeds energy into the diffuse reverb tail.</p>
+      <p>Beyond 2 bounces, remaining energy is folded into the parametric reverb tail rather than traced explicitly. This keeps the per-source ray count bounded.</p>
+
+<pre><span class="cm">// specular: discrete echo at known delay + direction</span>
+<span class="cm">// diffuse:  energy added to reverb tail, no distinct echo</span>
+<span class="kw">enum</span> <span class="ty">ReflectionKind</span> { Specular, Diffuse }
+
+<span class="kw">struct</span> <span class="ty">EarlyReflection</span> {
+    delay:     <span class="ty">f32</span>,   <span class="cm">// path length / SPEED_OF_SOUND</span>
+    energy:    <span class="ty">f32</span>,   <span class="cm">// compounded absorption</span>
+    direction: <span class="ty">Vec2</span>,  <span class="cm">// arrival direction at listener</span>
+    kind:      <span class="ty">ReflectionKind</span>,
+}</pre>
+
+      <h3>Path Statistics → Reverb Parameters</h3>
+      <p>The BFS path through the map is analysed to derive parametric reverb parameters. Mean path width drives reverb time; width variance drives diffusion character. These work correctly for arbitrary geometry — a tight maze produces short, directional reverb; a large irregular cavern produces long, diffuse reverb.</p>
+
+<pre><span class="kw">fn</span> <span class="nm">path_to_reverb</span>(path: &amp;<span class="ty">AcousticPath</span>) -&gt; <span class="ty">ReverbParams</span> {
+    <span class="kw">let</span> mean_width = path.mean_segment_width();
+    <span class="kw">let</span> variance   = path.segment_width_variance();
+
+    <span class="ty">ReverbParams</span> {
+        <span class="cm">// narrow path → short decay; wide path → long decay</span>
+        reverb_time: path.total_length * (<span class="nm">1.0</span> / mean_width) * <span class="nm">0.05</span>,
+
+        <span class="cm">// low variance (uniform width) → diffuse reverb</span>
+        <span class="cm">// high variance (corridor → room) → directional character</span>
+        diffusion: <span class="nm">1.0</span> - variance.sqrt().min(<span class="nm">1.0</span>),
+
+        pre_delay: path.total_length / <span class="nm">SPEED_OF_SOUND</span>,
+    }
+}</pre>
+    </section>
+
+    <!-- PHENOMENA -->
+    <section id="phenomena">
+      <h2>Physical Phenomena</h2>
+      <p>Assessment of each acoustic phenomenon for relevance in the tile-map model.</p>
+
+      <table class="prop-table">
+        <thead>
+          <tr>
+            <th>Phenomenon</th>
+            <th>Priority</th>
+            <th>Approach</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Spreading / divergence</td>
+            <td><span class="tag tag-must">Must</span></td>
+            <td>Inverse square falloff on direct path length. Modified by path transmission for indirect paths.</td>
+          </tr>
+          <tr>
+            <td>Absorption</td>
+            <td><span class="tag tag-must">Must</span></td>
+            <td>Per-material coefficient accumulated during DDA. Approximated with two frequency bands: full-range and low-passed. More wall hits → more LPF blend.</td>
+          </tr>
+          <tr>
+            <td>Transmission</td>
+            <td><span class="tag tag-must">Must</span></td>
+            <td>Per-material transmission fraction. All walls are one tile thick so no thickness modelling is needed — material is the only variable. Multiple walls compound multiplicatively.</td>
+          </tr>
+          <tr>
+            <td>Reflection</td>
+            <td><span class="tag tag-must">Must</span></td>
+            <td>Up to 2 specular bounce rays. Axis-aligned tile walls give free wall normals. Material diffusion flag routes energy to discrete echo vs reverb tail.</td>
+          </tr>
+          <tr>
+            <td>Diffusion</td>
+            <td><span class="tag tag-must">Must</span></td>
+            <td>Per-material flag (smooth → specular reflection, rough → diffuse). Diffuse reflections feed the reverb tail rather than producing discrete echoes.</td>
+          </tr>
+          <tr>
+            <td>Diffraction</td>
+            <td><span class="tag tag-should">Should</span></td>
+            <td>Corner tiles (open tile adjacent to wall edge) treated as weak secondary emitters. Prevents unnatural hard cutoff when listener rounds a corner.</td>
+          </tr>
+          <tr>
+            <td>Interference</td>
+            <td><span class="tag tag-ignore">Ignore*</span></td>
+            <td>Full wave interference requires phase simulation. Exception: flutter echo in narrow parallel corridors approximated via path width variance feeding a feedback delay.</td>
+          </tr>
+          <tr>
+            <td>Refraction</td>
+            <td><span class="tag tag-ignore">Ignore</span></td>
+            <td>Requires medium density / temperature gradients. Not relevant to tile-map geometry. A per-medium speed-of-sound constant is sufficient if underwater tiles exist.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- MATERIALS -->
+    <section id="materials">
+      <h2>Materials</h2>
+      <p>Each wall tile carries a material that determines its acoustic behaviour. All walls are exactly one tile thick — thickness is not a variable.</p>
+
+<pre><span class="kw">struct</span> <span class="ty">WallMaterial</span> {
+    <span class="cm">/// energy lost on reflection (0 = perfect mirror, 1 = full absorber)</span>
+    absorption:       <span class="ty">f32</span>,
+    <span class="cm">/// fraction of energy that passes through the wall</span>
+    transmission:     <span class="ty">f32</span>,
+    <span class="cm">/// low-pass cutoff for transmitted signal (0–1 normalised)</span>
+    transmission_lpf: <span class="ty">f32</span>,
+    <span class="cm">/// specular vs diffuse reflection character</span>
+    reflection:       <span class="ty">ReflectionKind</span>,
+}</pre>
+
+      <div class="material-grid">
+        <div class="material-card">
+          <div class="mat-name">Concrete</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:95%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:2%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:10%"></div></div></div>
+        </div>
+        <div class="material-card">
+          <div class="mat-name">Stone</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:80%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:5%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:15%"></div></div></div>
+        </div>
+        <div class="material-card">
+          <div class="mat-name">Wood</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:60%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:20%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:45%"></div></div></div>
+        </div>
+        <div class="material-card">
+          <div class="mat-name">Glass</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:25%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:65%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:80%"></div></div></div>
+        </div>
+        <div class="material-card">
+          <div class="mat-name">Drywall</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:50%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:30%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:50%"></div></div></div>
+        </div>
+        <div class="material-card">
+          <div class="mat-name">Rough Brick</div>
+          <div class="mat-bar-row"><span class="mat-bar-label">absorption</span><div class="mat-bar-track"><div class="mat-bar-fill" style="width:70%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">transmit</span><div class="mat-bar-track"><div class="mat-bar-fill tx" style="width:8%"></div></div></div>
+          <div class="mat-bar-row"><span class="mat-bar-label">lpf</span><div class="mat-bar-track"><div class="mat-bar-fill lp" style="width:20%"></div></div></div>
+        </div>
+      </div>
+      <p style="font-size:12px; color: var(--muted);">Bar values are illustrative starting points. All material parameters are data-driven and tunable.</p>
+    </section>
+
+    <!-- PARAMS -->
+    <section id="params">
+      <h2>Acoustic Params</h2>
+      <p>The output of one path trace cycle for a single source. Written by the acoustic thread, read by the audio thread. Describes "what treatment would be applied to any sound emitted from this entity's current position."</p>
+
+<pre><span class="kw">struct</span> <span class="ty">AcousticParams</span> {
+    <span class="cm">/// final volume after transmission + distance falloff</span>
+    volume:       <span class="ty">f32</span>,
+    <span class="cm">/// stereo pan derived from bottleneck/source position relative to listener</span>
+    pan:          <span class="ty">f32</span>,
+    <span class="cm">/// low-pass mix (0 = dry, 1 = fully low-passed)</span>
+    lpf:          <span class="ty">f32</span>,
+    <span class="cm">/// seconds before reverb tail begins (path length / speed of sound)</span>
+    pre_delay:    <span class="ty">f32</span>,
+    <span class="cm">/// RT60-equivalent decay time derived from path width statistics</span>
+    reverb_time:  <span class="ty">f32</span>,
+    <span class="cm">/// how much energy feeds into the diffuse reverb tail (0–1)</span>
+    reverb_send:  <span class="ty">f32</span>,
+    <span class="cm">/// diffusion character: 1 = fully diffuse, 0 = directional</span>
+    diffusion:    <span class="ty">f32</span>,
+    <span class="cm">/// up to 8 early discrete reflections</span>
+    early:        [<span class="ty">EarlyReflection</span>; <span class="nm">8</span>],
+    <span class="cm">/// world position from which sound appears to arrive (bottleneck)</span>
+    emission_point: <span class="ty">Vec2</span>,
+}</pre>
+    </section>
+
+    <!-- STATE MODEL -->
+    <section id="state">
+      <h2>State Model</h2>
+      <p>The acoustic update follows the same pure-function pattern as the game simulation. <code>update_acoustics</code> takes the current state and produces a new one — no mutation, easy to reason about, compatible with the existing architecture.</p>
+
+<pre><span class="kw">pub fn</span> <span class="nm">update_acoustics</span>(
+    state:  &amp;<span class="ty">AcousticState</span>,
+    game:   &amp;<span class="ty">GameState</span>,
+    level:  &amp;<span class="ty">Level</span>,
+) -&gt; <span class="ty">AcousticState</span> {
+    <span class="kw">let mut</span> next = state.clone();
+    next.listener = extract_listener(game);
+    next.sources  = collect_sound_sources(game);
+    next.params   = next.sources.iter()
+        .map(|(&amp;id, src)| {
+            <span class="kw">let</span> params = trace_acoustic_path(level, src, &amp;next.listener);
+            (id, params)
+        })
+        .collect();
+    next
+}</pre>
+    </section>
+
+    <!-- NON GOALS -->
+    <section id="non-goals">
+      <h2>Non-Goals</h2>
+      <p>The following are explicitly out of scope for this implementation:</p>
+      <table class="prop-table">
+        <thead><tr><th>Item</th><th>Reason</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>GPU compute for path tracing</td>
+            <td>Workload is too small to saturate a GPU. Dispatch overhead exceeds computation cost. CPU has ample headroom.</td>
+          </tr>
+          <tr>
+            <td>Offline acoustic bake</td>
+            <td>Probe grids dense enough for arbitrary geometry (spirals, mazes) offer no meaningful advantage over runtime tracing. Adds pipeline complexity for no perceptible gain.</td>
+          </tr>
+          <tr>
+            <td>HRTF / binaural rendering</td>
+            <td>Requires head-related transfer function datasets. Stereo pan via <code>rodio</code>'s built-in <code>.pan()</code> is sufficient for 2D gameplay.</td>
+          </tr>
+          <tr>
+            <td>Wave simulation / full interference</td>
+            <td>Requires per-frequency phase tracking. Computationally prohibitive. Flutter echo approximation via path statistics covers the perceptually significant case.</td>
+          </tr>
+          <tr>
+            <td>Frequency-dependent absorption beyond 2 bands</td>
+            <td>Diminishing perceptual returns beyond full-range + low-passed blend.</td>
+          </tr>
+          <tr>
+            <td>More than 2 specular bounce rays</td>
+            <td>Energy beyond 2 bounces is low enough to fold into the diffuse reverb tail without perceptible difference.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+</div>
+
+</body>
+</html>
