@@ -135,23 +135,47 @@ pub fn place_text(
     text: &str,
     halign: HAlign,
     valign: VAlign,
+    col_offset: i32,
+    row_offset: i32,
     fg: [u8; 4],
     bg: [u8; 4],
 ) {
     let text_len = text.chars().count();
-    let col = match halign {
+    let aligned_col = match halign {
         HAlign::Left => 0,
         HAlign::Center => layer.cols.saturating_sub(text_len) / 2,
         HAlign::Right => layer.cols.saturating_sub(text_len),
     };
-    let row = match valign {
+    let aligned_row = match valign {
         VAlign::Top => 0,
         VAlign::Middle => layer.rows.saturating_sub(1) / 2,
         VAlign::Bottom => layer.rows.saturating_sub(1),
     };
 
+    let col = apply_offset(aligned_col, col_offset);
+    let row = apply_offset(aligned_row, row_offset);
+
+    place_text_at(layer, text, col, row, fg, bg);
+}
+
+pub fn place_text_at(
+    layer: &mut TextLayer,
+    text: &str,
+    col: usize,
+    row: usize,
+    fg: [u8; 4],
+    bg: [u8; 4],
+) {
     for (index, glyph) in text.chars().enumerate() {
         layer.set(col + index, row, Cell { glyph, fg, bg });
+    }
+}
+
+fn apply_offset(base: usize, offset: i32) -> usize {
+    if offset >= 0 {
+        base.saturating_add(offset as usize)
+    } else {
+        base.saturating_sub(offset.unsigned_abs() as usize)
     }
 }
 
@@ -219,7 +243,7 @@ fn blend(dst: &mut [u8; 4], src: [u8; 4]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, HAlign, TextLayer, VAlign, place_text, wrap_text};
+    use super::{Cell, HAlign, TextLayer, VAlign, place_text, place_text_at, wrap_text};
     use crate::font::{Font, GLYPH_H, GLYPH_W};
 
     #[test]
@@ -307,6 +331,8 @@ mod tests {
             "HI",
             HAlign::Center,
             VAlign::Bottom,
+            0,
+            0,
             [255, 255, 255, 255],
             [0, 0, 0, 0],
         );
@@ -315,6 +341,44 @@ mod tests {
         let col = (layer.cols - 2) / 2;
         assert_eq!(layer.cells[row * layer.cols + col].unwrap().glyph, 'H');
         assert_eq!(layer.cells[row * layer.cols + col + 1].unwrap().glyph, 'I');
+    }
+
+    #[test]
+    fn places_single_line_text_with_negative_row_offset() {
+        let mut layer = TextLayer::new((GLYPH_W * 6) as u32, (GLYPH_H * 4) as u32);
+
+        place_text(
+            &mut layer,
+            "HI",
+            HAlign::Center,
+            VAlign::Bottom,
+            0,
+            -1,
+            [255, 255, 255, 255],
+            [0, 0, 0, 0],
+        );
+
+        let row = layer.rows - 2;
+        let col = (layer.cols - 2) / 2;
+        assert_eq!(layer.cells[row * layer.cols + col].unwrap().glyph, 'H');
+        assert_eq!(layer.cells[row * layer.cols + col + 1].unwrap().glyph, 'I');
+    }
+
+    #[test]
+    fn places_text_at_absolute_position() {
+        let mut layer = TextLayer::new((GLYPH_W * 4) as u32, (GLYPH_H * 3) as u32);
+
+        place_text_at(
+            &mut layer,
+            "OK",
+            1,
+            2,
+            [255, 255, 255, 255],
+            [0, 0, 0, 0],
+        );
+
+        assert_eq!(layer.cells[2 * layer.cols + 1].unwrap().glyph, 'O');
+        assert_eq!(layer.cells[2 * layer.cols + 2].unwrap().glyph, 'K');
     }
 
     #[test]

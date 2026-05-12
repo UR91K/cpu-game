@@ -14,35 +14,31 @@ use crate::model::ControllerId;
 use crate::net::server::Server;
 use crate::render_assembly;
 use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
-use crate::text_layer::{Cell, HAlign, TextLayer, VAlign, place_text};
+use crate::text_layer::{HAlign, TextLayer, VAlign, place_text, place_text_at};
 use crate::texture::TextureManager;
 
 const TARGET_FPS: u64 = 60;
 
-fn rgba_from_hex_str(hex: &str, alpha: u8) -> [u8; 4] {
-    let hex = hex.trim_start_matches('#');
-    let (r, g, b) = match hex.len() {
-        3 => {
-            let [r, g, b] = [0, 1, 2].map(|i| {
-                let nibble = u8::from_str_radix(&hex[i..i + 1], 16).unwrap();
-                nibble << 4 | nibble
-            });
-            (r, g, b)
-        }
-        6 | 8 => {
-            let [r, g, b] = [0, 2, 4].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap());
-            (r, g, b)
-        }
-        _ => panic!("invalid hex color: #{hex}"),
-    };
-
-    let a = if hex.len() == 8 {
-        u8::from_str_radix(&hex[6..8], 16).unwrap()
-    } else {
-        alpha
-    };
-
+const fn rgba_from_hex(hex: &str, a: u8) -> [u8; 4] {
+    let b = hex.as_bytes();
+    // b[0] == b'#'
+    let r = hex_pair(b[1], b[2]);
+    let g = hex_pair(b[3], b[4]);
+    let b = hex_pair(b[5], b[6]);
     [r, g, b, a]
+}
+
+const fn hex_pair(hi: u8, lo: u8) -> u8 {
+    hex_digit(hi) << 4 | hex_digit(lo)
+}
+
+const fn hex_digit(b: u8) -> u8 {
+    match b {
+        b'0'..=b'9' => b - b'0',
+        b'a'..=b'f' => b - b'a' + 10,
+        b'A'..=b'F' => b - b'A' + 10,
+        _ => panic!("invalid hex digit"),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,31 +186,29 @@ impl App {
     }
 
     fn build_hud(&mut self, _scene: &render_assembly::RenderScene) {
-        let bottom_row = self.text_layer.rows.saturating_sub(1);
-        let above_bottom_row = bottom_row.saturating_sub(1);
-
         let controls = "ESC CAPTURE  WASD MOVE  SPACE/LMB FIRE  F4 FONT  F11 FULLSCREEN";
         let test = "Meow! Test Test Test";
 
-        let controls_col = self.text_layer.cols.saturating_sub(controls.chars().count()) / 2;
-        let test_col = self.text_layer.cols.saturating_sub(test.chars().count()) / 2;
-
-        Self::write_text_line(
+        place_text(
             &mut self.text_layer,
-            controls_col,
-            bottom_row,
             controls,
-            rgba_from_hex_str("#DCDCDA", 255),
-            rgba_from_hex_str("#000000", 140),
+            HAlign::Center,
+            VAlign::Bottom,
+            0,
+            0,
+            rgba_from_hex("#DCDCDA", 255),
+            rgba_from_hex("#000000", 140),
         );
 
-        Self::write_text_line(
+        place_text(
             &mut self.text_layer,
-            test_col,
-            above_bottom_row,
             test,
-            rgba_from_hex_str("#f00cca", 255),
-            rgba_from_hex_str("#23c9f3", 140),
+            HAlign::Center,
+            VAlign::Bottom,
+            0,
+            -1,
+            rgba_from_hex("#f00cca", 255),
+            rgba_from_hex("#23c9f3", 140),
         );
     }
     
@@ -235,7 +229,16 @@ impl App {
             scene.billboards.len(),
             capture,
         );
-        Self::write_text_line(&mut self.text_layer, 1, 1, &status, fg, bg);
+        place_text(
+            &mut self.text_layer,
+            &status,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            1,
+            fg,
+            bg,
+        );
     }
 
     fn build_font_test_overlay(&mut self) {
@@ -246,6 +249,8 @@ impl App {
             "FONT TEST  (F4 TO TOGGLE)",
             HAlign::Center,
             VAlign::Top,
+            0,
+            0,
             [255, 255, 255, 255],
             [0, 0, 0, 180],
         );
@@ -254,27 +259,14 @@ impl App {
             let start = FIRST_ASCII as u32 + (row * FONT_COLS) as u32;
             let end = (start + FONT_COLS as u32).min(128);
             let line: String = (start..end).filter_map(char::from_u32).collect();
-            Self::write_text_line(
+            place_text_at(
                 &mut self.text_layer,
+                &line,
                 1,
                 row + 3,
-                &line,
                 [255, 255, 255, 255],
                 [0, 0, 0, 0],
             );
-        }
-    }
-
-    fn write_text_line(
-        layer: &mut TextLayer,
-        col: usize,
-        row: usize,
-        text: &str,
-        fg: [u8; 4],
-        bg: [u8; 4],
-    ) {
-        for (index, glyph) in text.chars().enumerate() {
-            layer.set(col + index, row, Cell { glyph, fg, bg });
         }
     }
 
