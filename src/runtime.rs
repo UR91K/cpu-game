@@ -72,6 +72,7 @@ impl ClientSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuthoritativeUpdate {
+    pub ack: u64,
     pub snapshot: ClientSnapshot,
 }
 
@@ -79,9 +80,11 @@ impl AuthoritativeUpdate {
     pub fn from_game_state(
         game_state: GameState,
         local_controller_id: Option<ControllerId>,
+        ack: u64,
         transport_debug: Option<TransportDebug>,
     ) -> Self {
         Self {
+            ack,
             snapshot: ClientSnapshot::from_game_state(
                 game_state,
                 local_controller_id,
@@ -144,6 +147,7 @@ pub struct ChannelClientRuntime {
     client: SnapshotRuntime,
     previous_snapshot: Option<ClientSnapshot>,
     last_update_at: Option<Instant>,
+    last_acked_input_tick: u64,
     pending_inputs: SharedInputHistory,
 }
 
@@ -159,18 +163,20 @@ impl ChannelClientRuntime {
             client: SnapshotRuntime::new(level),
             previous_snapshot: None,
             last_update_at: None,
+            last_acked_input_tick: 0,
             pending_inputs,
         }
     }
 
     fn drain_updates(&mut self) {
         while let Ok(update) = self.updates.try_recv() {
-            let acked_input_tick = last_acked_input_tick(&update.snapshot);
+            let acked_input_tick = update.ack;
             self.pending_inputs
                 .lock()
                 .unwrap()
                 .retain(|input| input.tick > acked_input_tick);
             self.previous_snapshot = self.client.snapshot();
+            self.last_acked_input_tick = acked_input_tick;
             self.client.apply_update(update);
             self.last_update_at = Some(Instant::now());
         }
@@ -179,7 +185,7 @@ impl ChannelClientRuntime {
     fn predicted_snapshot(&self) -> Option<ClientSnapshot> {
         let authoritative = self.client.snapshot()?;
         let local_controller_id = authoritative.local_controller_id?;
-        let acked_input_tick = last_acked_input_tick(&authoritative);
+        let acked_input_tick = self.last_acked_input_tick;
         let pending_inputs = self
             .pending_inputs
             .lock()
@@ -305,15 +311,6 @@ fn interpolate_snapshot(
     }
 
     blended
-}
-
-fn last_acked_input_tick(snapshot: &ClientSnapshot) -> u64 {
-    snapshot
-        .transport_debug
-        .as_ref()
-        .and_then(|debug| debug.last_polled_input.as_ref())
-        .map(|input| input.tick)
-        .unwrap_or(0)
 }
 
 fn lerp(start: f64, end: f64, alpha: f64) -> f64 {

@@ -63,18 +63,25 @@ impl Controller for ChannelController {
     }
 
     fn receive_state(&mut self, state: &GameState) {
-        let transport_debug = {
+        let (ack, transport_debug) = {
             let transport_state = self.transport_state.lock().unwrap();
-            TransportDebug {
+            let ack = transport_state
+                .last_polled_input
+                .as_ref()
+                .map(|input| input.tick)
+                .unwrap_or(0);
+            let transport_debug = TransportDebug {
                 received_count: transport_state.received_count,
                 polled_count: transport_state.polled_count,
                 last_received_input: transport_state.last_received_input.clone(),
                 last_polled_input: transport_state.last_polled_input.clone(),
-            }
+            };
+            (ack, transport_debug)
         };
         let _ = self.update_tx.send(AuthoritativeUpdate::from_game_state(
             state.clone(),
             Some(self.id),
+            ack,
             Some(transport_debug),
         ));
     }
