@@ -239,7 +239,7 @@ impl App {
         //     rgba_from_hex("#23c9f3", 140),
         // );
     }
-    
+
     fn build_debug_overlay(
         &mut self,
         scene: &render_assembly::RenderScene,
@@ -264,13 +264,30 @@ impl App {
                 .join(",")
         };
         let local_player = snapshot.game_state.players.get(&viewer_id);
-        let local_pawn = local_player.and_then(|player| snapshot.game_state.entities.get(&player.pawn_id));
+        let local_pawn =
+            local_player.and_then(|player| snapshot.game_state.entities.get(&player.pawn_id));
         let input_state = format!(
             "W{} A{} S{} D{} PF{}",
-            if self.keys.contains(&KeyCode::KeyW) { 1 } else { 0 },
-            if self.keys.contains(&KeyCode::KeyA) { 1 } else { 0 },
-            if self.keys.contains(&KeyCode::KeyS) { 1 } else { 0 },
-            if self.keys.contains(&KeyCode::KeyD) { 1 } else { 0 },
+            if self.keys.contains(&KeyCode::KeyW) {
+                1
+            } else {
+                0
+            },
+            if self.keys.contains(&KeyCode::KeyA) {
+                1
+            } else {
+                0
+            },
+            if self.keys.contains(&KeyCode::KeyS) {
+                1
+            } else {
+                0
+            },
+            if self.keys.contains(&KeyCode::KeyD) {
+                1
+            } else {
+                0
+            },
             if self.pending_fire { 1 } else { 0 },
         );
         let last_input = self
@@ -303,11 +320,7 @@ impl App {
         );
         let ids = format!(
             "HUM {}  VIEW {}  SNAP {:?}  RUN {:?}  PLAYERS [{}]",
-            self.human_id,
-            viewer_id,
-            snapshot.local_controller_id,
-            runtime_local_id,
-            player_ids,
+            self.human_id, viewer_id, snapshot.local_controller_id, runtime_local_id, player_ids,
         );
         let world = format!(
             "ENT {:02}  PLAY {:02}  INPUT {}",
@@ -358,7 +371,12 @@ impl App {
         let prediction = snapshot
             .prediction_debug
             .as_ref()
-            .map(|debug| format!("PRED ack={} pending={}", debug.acked_input_tick, debug.pending_input_count))
+            .map(|debug| {
+                format!(
+                    "PRED ack={} pending={}",
+                    debug.acked_input_tick, debug.pending_input_count
+                )
+            })
             .unwrap_or_else(|| String::from("PRED ack=----- pending=0"));
         let last = format!("LAST {}", last_input);
         place_text(
@@ -533,7 +551,9 @@ impl App {
             if self.show_debug_info {
                 self.build_debug_overlay(
                     scene,
-                    snapshot.as_ref().expect("snapshot should exist when drawing debug overlay"),
+                    snapshot
+                        .as_ref()
+                        .expect("snapshot should exist when drawing debug overlay"),
                     viewer_id.expect("viewer id should exist when drawing debug overlay"),
                 );
             }

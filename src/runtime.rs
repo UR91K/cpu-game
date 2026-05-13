@@ -82,7 +82,11 @@ impl AuthoritativeUpdate {
         transport_debug: Option<TransportDebug>,
     ) -> Self {
         Self {
-            snapshot: ClientSnapshot::from_game_state(game_state, local_controller_id, transport_debug),
+            snapshot: ClientSnapshot::from_game_state(
+                game_state,
+                local_controller_id,
+                transport_debug,
+            ),
         }
     }
 }

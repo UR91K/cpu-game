@@ -1,7 +1,14 @@
-use std::{net::TcpListener, thread, time::{Duration, Instant}};
+use std::{
+    net::TcpListener,
+    thread,
+    time::{Duration, Instant},
+};
 
-use crate::{clock::ClockManager, net::{server::Server, tcp::build_tcp_controller}, simulation::TICK_DT};
-
+use crate::{
+    clock::ClockManager,
+    net::{server::Server, tcp::build_tcp_controller},
+    simulation::TICK_DT,
+};
 
 pub fn run_network_server_loop(mut clock_manager: ClockManager, port: u16) {
     let listener = TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
@@ -16,7 +23,10 @@ pub fn run_network_server_loop(mut clock_manager: ClockManager, port: u16) {
     let mut next_controller_id = 1u64;
 
     loop {
-        accept_pending_clients(&listener, clock_manager.server_mut().expect("server should exist"));
+        accept_pending_clients(
+            &listener,
+            clock_manager.server_mut().expect("server should exist"),
+        );
 
         let now = Instant::now();
         if now < next_tick {

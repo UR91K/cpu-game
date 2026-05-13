@@ -234,9 +234,8 @@ pub fn wrap_text(text: &str, max_cols: usize) -> Vec<String> {
 fn blend(dst: &mut [u8; 4], src: [u8; 4]) {
     let alpha = src[3] as u32;
     for channel in 0..3 {
-        dst[channel] = ((src[channel] as u32 * alpha
-            + dst[channel] as u32 * (255 - alpha))
-            / 255) as u8;
+        dst[channel] =
+            ((src[channel] as u32 * alpha + dst[channel] as u32 * (255 - alpha)) / 255) as u8;
     }
     dst[3] = dst[3].saturating_add(src[3]);
 }
@@ -310,16 +309,10 @@ mod tests {
         let (unlit_x, unlit_y) = unlit.expect("expected unlit pixel in glyph");
 
         let lit_index = (lit_y * GLYPH_W + lit_x) * 4;
-        assert_eq!(
-            &buf[lit_index..lit_index + 4],
-            &[240, 10, 20, 255],
-        );
+        assert_eq!(&buf[lit_index..lit_index + 4], &[240, 10, 20, 255],);
 
         let unlit_index = (unlit_y * GLYPH_W + unlit_x) * 4;
-        assert_eq!(
-            &buf[unlit_index..unlit_index + 4],
-            &[5, 10, 120, 128],
-        );
+        assert_eq!(&buf[unlit_index..unlit_index + 4], &[5, 10, 120, 128],);
     }
 
     #[test]
@@ -368,14 +361,7 @@ mod tests {
     fn places_text_at_absolute_position() {
         let mut layer = TextLayer::new((GLYPH_W * 4) as u32, (GLYPH_H * 3) as u32);
 
-        place_text_at(
-            &mut layer,
-            "OK",
-            1,
-            2,
-            [255, 255, 255, 255],
-            [0, 0, 0, 0],
-        );
+        place_text_at(&mut layer, "OK", 1, 2, [255, 255, 255, 255], [0, 0, 0, 0]);
 
         assert_eq!(layer.cells[2 * layer.cols + 1].unwrap().glyph, 'O');
         assert_eq!(layer.cells[2 * layer.cols + 2].unwrap().glyph, 'K');

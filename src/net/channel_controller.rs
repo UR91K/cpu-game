@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 
 use super::Controller;
 use crate::input::InputMessage;
@@ -72,12 +72,10 @@ impl Controller for ChannelController {
                 last_polled_input: transport_state.last_polled_input.clone(),
             }
         };
-        let _ = self
-            .update_tx
-            .send(AuthoritativeUpdate::from_game_state(
-                state.clone(),
-                Some(self.id),
-                Some(transport_debug),
-            ));
+        let _ = self.update_tx.send(AuthoritativeUpdate::from_game_state(
+            state.clone(),
+            Some(self.id),
+            Some(transport_debug),
+        ));
     }
 }

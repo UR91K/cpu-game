@@ -1,7 +1,7 @@
 use std::env;
 use std::process::Command;
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use winit::event_loop::EventLoop;
 
@@ -15,11 +15,10 @@ mod net;
 mod render_assembly;
 mod renderer;
 mod runtime;
+mod server_runner;
 mod simulation;
 mod text_layer;
 mod texture;
-mod server_runner;
-
 
 use app::App;
 use clock::ClockManager;
@@ -141,14 +140,16 @@ fn run_client(options: ClientLaunchOptions) {
     let (update_tx, update_rx) = mpsc::channel();
     let pending_inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
     start_tcp_client_transport(requested_server_addr, input_rx, update_tx);
-    let client_runtime = ChannelClientRuntime::new(
-        Arc::clone(&level),
-        update_rx,
-        Arc::clone(&pending_inputs),
-    );
+    let client_runtime =
+        ChannelClientRuntime::new(Arc::clone(&level), update_rx, Arc::clone(&pending_inputs));
     let input_sink = ChannelInputSink::new(input_tx, pending_inputs);
 
-    run_windowed_client(Box::new(client_runtime), Box::new(input_sink), HUMAN_ID, texture_manager);
+    run_windowed_client(
+        Box::new(client_runtime),
+        Box::new(input_sink),
+        HUMAN_ID,
+        texture_manager,
+    );
 }
 
 fn run_host(options: HostLaunchOptions) {

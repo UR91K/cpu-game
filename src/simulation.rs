@@ -414,7 +414,9 @@ fn update_projectiles(state: &mut GameState, level: &Level, delta: f64) {
         .entities
         .iter()
         .filter_map(|(id, entity)| match entity.kind {
-            EntityKind::Pawn { owner_id } => Some((*id, owner_id, entity.x, entity.y, entity.radius)),
+            EntityKind::Pawn { owner_id } => {
+                Some((*id, owner_id, entity.x, entity.y, entity.radius))
+            }
             _ => None,
         })
         .collect();

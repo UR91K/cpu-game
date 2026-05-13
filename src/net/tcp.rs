@@ -3,8 +3,8 @@ use std::thread;
 
 use std::net::TcpStream;
 
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use std::time::Duration;
 
@@ -12,8 +12,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::input::{self, InputMessage};
-use crate::net::{self, tcp};
 use crate::net::channel_controller::{self, ChannelController};
+use crate::net::{self, tcp};
 use crate::runtime::{self, AuthoritativeUpdate};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -54,8 +54,6 @@ pub fn write_message<T: Serialize>(stream: &mut TcpStream, message: &T) -> io::R
     stream.write_all(&len.to_le_bytes())?;
     stream.write_all(&encoded)
 }
-
-
 
 pub fn build_tcp_controller(stream: TcpStream, controller_id: u64) -> ChannelController {
     let (input_tx, input_rx) = mpsc::channel();
