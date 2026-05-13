@@ -1,7 +1,7 @@
 #set document(title: "Audio Engine -- Technical Design Document")
 #set page(
   paper: "a4",
-  margin: (x: 2.5cm, y: 2.5cm),
+  margin: (x: 1cm, y: 1cm),
   header: [
     #set text(size: 8pt, fill: rgb("#888"))
     #grid(
@@ -22,7 +22,7 @@
   ],
 )
 
-#set text(font: "Garamond Premier Pro", size: 10.5pt, fill: rgb("#1a1a1a"))
+#set text(font: "Garamond Premier Pro", size: 10pt, fill: rgb("#1a1a1a"))
 #set par(justify: true, leading: 0.65em)
 #set heading(numbering: "1.")
 
@@ -79,7 +79,7 @@
     inset: (x: 14pt, y: 12pt),
     radius: 4pt,
   )[
-    #set text(font: "Apercu Mono Pro", size: 8pt, fill: rgb("#e2e8f0"))
+    #set text(font: "Iosevka", size: 6pt, fill: rgb("#e2e8f0"))
     #it
   ]
 }
@@ -90,7 +90,7 @@
     inset: (x: 4pt, y: 2pt),
     radius: 3pt,
   )[
-    #set text(font: "Apercu Mono Pro", size: 9pt, fill: rgb("#be185d"))
+    #set text(font: "Iosevka", size: 6pt, fill: rgb("#be185d"))
     #it
   ]
 }
@@ -160,6 +160,8 @@ These principles govern every design decision in this document. When in doubt ab
 #callout(title: "Scalar summaries are diagnostics, not render primitives")[
   `reverb_time` (RT60) may appear as an analysis metric or budgeting aid. It does not define the rendered tail. Fields that imply a single aggregate tail bus -- such as `reverb_send` or `pre_delay` as top-level params -- are not part of the model.
 ]
+
+#pagebreak()
 
 = Pipeline
 
@@ -441,10 +443,11 @@ RT60 can be derived from the arrival set as an analysis metric -- plot energy ag
 Arrivals with two or more diffuse bounces have lost their discrete echo character and become part of the reverb tail. Rather than treating them as point arrivals, they are routed through a chain of allpass filters that smear energy in time without altering frequency content -- matching what repeated diffuse reflections do physically.
 
 This is the same building block used in Schroeder and Freeverb reverbs, but here the chain parameters are derived from actual ray path geometry rather than being fixed constants tuned by ear. Crucially, the chain is built per-arrival and lives on `AcousticArrival` -- each arrival carries its own allpass history from the specific surfaces it bounced off. Two arrivals that took different paths through different materials will have different chains even if they accumulate the same number of diffuse bounces.
-
+#pagebreak()
 == Construction During the Trace
 
-The allpass chain is built _inline during `trace_ray`_, not post-hoc from a frozen struct. Segment geometry -- the length and material of each bounce -- is only available while the trace is executing and that wall hit is live on the stack. Once the arrival is pushed to the arrivals vec the per-segment data is gone; there is no `diffuse_segments` field on `AcousticArrival`. The chain accumulates as a parameter passed through the recursion alongside energy, distance, and lpf_acc:
+The allpass chain is built _inline during `trace_ray`_, not post-hoc from a frozen struct. Segment geometry -- the length and material of each bounce -- is only available while the trace is executing and that wall hit is live on the stack.
+Once the arrival is pushed to the arrivals vec the per-segment data is gone; there is no `diffuse_segments` field on `AcousticArrival`. The chain accumulates as a parameter passed through the recursion alongside energy, distance, and lpf_acc:
 
 ```rust
 fn trace_ray(
@@ -610,6 +613,8 @@ Assessment of each acoustic phenomenon for relevance in the tile-map model.
   [Requires medium density / temperature gradients. Not relevant to tile-map geometry. A per-medium speed-of-sound constant is sufficient if underwater tiles exist.],
 )
 
+#pagebreak()
+
 = Materials
 
 Each wall tile carries a material that determines its acoustic behaviour. All walls are exactly one tile thick -- thickness is not a variable.
@@ -680,6 +685,8 @@ struct WallMaterial {
 #v(4pt)
 #text(size: 8.5pt, fill: rgb("#94a3b8"))[Bar values are illustrative starting points. All material parameters are data-driven and tunable.]
 
+#pagebreak()
+
 = Acoustic Params
 
 The output of one path trace cycle for a single source. Written by the acoustic thread, read by the audio thread. The arrival set is the primary representation -- everything the renderer needs is on the arrivals themselves. No top-level fields imply a single aggregate tail bus.
@@ -738,6 +745,8 @@ pub fn update_acoustics(
 }
 ```
 
+#pagebreak()
+
 = Stability Controls
 
 Budget guards are not optional. The acoustic thread must degrade gracefully under load without affecting the audio thread. All controls operate on the ray solve -- they reduce tracing work. They do not operate on the output by collapsing or merging arrivals.
@@ -771,6 +780,8 @@ Budget guards are not optional. The acoustic thread must degrade gracefully unde
   The SoundPhysics Minecraft mod required explicit stability controls in production -- processing distance limits, rate limiting, ambient sound skipping, and moving sound update throttling. These were not afterthoughts; they were necessary to keep the system well-behaved across the full range of in-game situations. This system needs the same from day one.
 ]
 
+#pagebreak()
+
 = PS1 Fidelity Simplifications
 
 The game targets a deliberate aesthetic dissonance: PS1-era visuals with disproportionately detailed simulation underneath. The audio engine is part of that same hierarchy -- spatially accurate, physically derived acoustics coming out of something that looks like 1997. The following simplifications are intentional and fit that context without compromising the core physical accuracy.
@@ -800,6 +811,8 @@ The game targets a deliberate aesthetic dissonance: PS1-era visuals with disprop
 #callout(title: "What is not simplified")[
   Ray count and bounce depth are explicitly preserved at full fidelity. These are where the emergent spatial behaviour lives -- the spiral room, the focused doorway reverb, the maze flutter echo. Reducing them would cut the thing that makes the system distinctive, not just reduce visual quality.
 ]
+
+#pagebreak()
 
 = Non-Goals
 
