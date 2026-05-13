@@ -93,10 +93,12 @@ Examples of foundational tasks (adjust based on your project):
 ### Implementation for User Story 1
 
 - [ ] T013 [P] [US1] Create or update domain data structures in the owning module
-- [ ] T014 [P] [US1] Implement authoritative logic in the owning module or crate
+- [ ] T014 [P] [US1] Implement authoritative logic in the owning module or crate,
+  preferring pure transforms before boundary mutation where it improves clarity
 - [ ] T015 [US1] Wire transport, presentation, or input integration to that logic
 - [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add instrumentation or diagnostics for risky boundaries
+- [ ] T017 [US1] Add instrumentation or diagnostics for risky boundaries and
+  measure hot-path allocation behavior when relevant
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -116,7 +118,8 @@ Examples of foundational tasks (adjust based on your project):
 ### Implementation for User Story 2
 
 - [ ] T020 [P] [US2] Create or update domain data structures in the owning module
-- [ ] T021 [US2] Implement authoritative logic in the owning module or crate
+- [ ] T021 [US2] Implement authoritative logic in the owning module or crate,
+  preferring pure transforms before boundary mutation where it improves clarity
 - [ ] T022 [US2] Implement boundary integration in the appropriate layer
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
@@ -138,7 +141,8 @@ Examples of foundational tasks (adjust based on your project):
 ### Implementation for User Story 3
 
 - [ ] T026 [P] [US3] Create or update domain data structures in the owning module
-- [ ] T027 [US3] Implement authoritative logic in the owning module or crate
+- [ ] T027 [US3] Implement authoritative logic in the owning module or crate,
+  preferring pure transforms before boundary mutation where it improves clarity
 - [ ] T028 [US3] Implement boundary integration in the appropriate layer
 
 **Checkpoint**: All user stories should now be independently functional
@@ -155,7 +159,8 @@ Examples of foundational tasks (adjust based on your project):
 
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
-- [ ] TXXX Performance measurement and optimization across all stories
+- [ ] TXXX Performance measurement and optimization across all stories,
+  including hot-path allocation reuse or justification
 - [ ] TXXX [P] Additional unit, property, or integration tests in the relevant test target
 - [ ] TXXX Security hardening
 - [ ] TXXX Run quickstart.md validation
@@ -249,6 +254,8 @@ With multiple developers:
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
 - Verify required tests fail before implementing
+- Keep hot-path work explicit about allocation reuse, scratch storage, or why
+  extra ownership churn is acceptable
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

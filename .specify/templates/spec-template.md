@@ -95,11 +95,17 @@
   and failure or desync handling for multiplayer-sensitive behavior.
 - **FR-008**: Specification MUST define the automated validation required for any
   simulation, protocol, or presentation contract it changes.
+- **FR-009**: Specification MUST describe any frame-sensitive or tick-sensitive
+  path it changes, including whether buffers, scratch storage, or other owned
+  data are reused to avoid unnecessary alloc/drop churn.
+- **FR-010**: Specification SHOULD call out logic that can be expressed as pure
+  transformations before boundary mutation when that decomposition improves
+  readability, testability, or replayability.
 
 *Example of marking unclear requirements:*
 
-- **FR-009**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-010**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-011**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
+- **FR-012**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
 ### Key Entities *(include if feature involves data)*
 
@@ -120,7 +126,7 @@
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
 - **SC-005**: [Performance or correctness budget tied to frame pacing, tick rate,
-  render throughput, or desync tolerance when relevant]
+  render throughput, desync tolerance, or hot-path allocation churn when relevant]
 
 ## Assumptions
 
