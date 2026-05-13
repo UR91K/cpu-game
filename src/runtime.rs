@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 
 use crate::clock::ClockManager;
 use crate::model::{EntityId, Level};
@@ -40,6 +41,19 @@ impl ClientSnapshot {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AuthoritativeUpdate {
+    pub snapshot: ClientSnapshot,
+}
+
+impl AuthoritativeUpdate {
+    pub fn from_game_state(game_state: GameState) -> Self {
+        Self {
+            snapshot: ClientSnapshot::from_game_state(game_state),
+        }
+    }
+}
+
 pub trait GameRuntime {
     fn advance(&mut self, frame_dt: f64);
     fn snapshot(&self) -> Option<ClientSnapshot>;
@@ -67,6 +81,10 @@ impl SnapshotRuntime {
 
     pub fn update_snapshot(&mut self, snapshot: Option<ClientSnapshot>) {
         self.snapshot = snapshot;
+    }
+
+    pub fn apply_update(&mut self, update: AuthoritativeUpdate) {
+        self.update_snapshot(Some(update.snapshot));
     }
 }
 
@@ -101,12 +119,16 @@ impl LocalClientRuntime {
     }
 
     fn refresh_snapshot(&mut self) {
-        let snapshot = self
+        let update = self
             .authority
             .server_state()
             .cloned()
-            .map(ClientSnapshot::from_game_state);
-        self.client.update_snapshot(snapshot);
+            .map(AuthoritativeUpdate::from_game_state);
+
+        match update {
+            Some(update) => self.client.apply_update(update),
+            None => self.client.update_snapshot(None),
+        }
     }
 }
 
@@ -114,6 +136,42 @@ impl GameRuntime for LocalClientRuntime {
     fn advance(&mut self, frame_dt: f64) {
         self.authority.advance(frame_dt);
         self.refresh_snapshot();
+    }
+
+    fn snapshot(&self) -> Option<ClientSnapshot> {
+        self.client.snapshot()
+    }
+
+    fn level(&self) -> &Level {
+        self.client.level()
+    }
+}
+
+#[allow(dead_code)]
+pub struct ChannelClientRuntime {
+    updates: Receiver<AuthoritativeUpdate>,
+    client: SnapshotRuntime,
+}
+
+#[allow(dead_code)]
+impl ChannelClientRuntime {
+    pub fn new(level: Arc<Level>, updates: Receiver<AuthoritativeUpdate>) -> Self {
+        Self {
+            updates,
+            client: SnapshotRuntime::new(level),
+        }
+    }
+
+    fn drain_updates(&mut self) {
+        while let Ok(update) = self.updates.try_recv() {
+            self.client.apply_update(update);
+        }
+    }
+}
+
+impl GameRuntime for ChannelClientRuntime {
+    fn advance(&mut self, _frame_dt: f64) {
+        self.drain_updates();
     }
 
     fn snapshot(&self) -> Option<ClientSnapshot> {

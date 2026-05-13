@@ -30,30 +30,85 @@ use net::server::Server;
 use runtime::LocalClientRuntime;
 use simulation::TICK_DT;
 
+const DEFAULT_SERVER_IP: &str = "127.0.0.1";
+const DEFAULT_PORT: u16 = 3456;
+
+struct ClientLaunchOptions {
+    server_ip: String,
+    server_port: u16,
+}
+
+struct ServerLaunchOptions {
+    port: u16,
+}
+
+struct HostLaunchOptions {
+    port: u16,
+}
+
 enum StartupMode {
-    Client,
-    Server,
+    Client(ClientLaunchOptions),
+    Server(ServerLaunchOptions),
+    Host(HostLaunchOptions),
 }
 
 impl StartupMode {
     fn from_args() -> Result<Self, String> {
-        let mut mode = Self::Client;
+        let mut mode_name = String::from("client");
+        let mut server_ip = String::from(DEFAULT_SERVER_IP);
+        let mut port = DEFAULT_PORT;
+        let mut args = env::args().skip(1);
 
-        for arg in env::args().skip(1) {
+        while let Some(arg) = args.next() {
             match arg.as_str() {
-                "client" | "--client" | "--mode=client" => mode = Self::Client,
-                "server" | "--server" | "--mode=server" => mode = Self::Server,
+                "client" | "--client" | "--mode=client" => mode_name = String::from("client"),
+                "server" | "--server" | "--mode=server" => mode_name = String::from("server"),
+                "host" | "--host" | "--mode=host" => mode_name = String::from("host"),
+                "--ip" => {
+                    let Some(value) = args.next() else {
+                        return Err(String::from("missing value after --ip"));
+                    };
+                    server_ip = value;
+                }
+                "--port" => {
+                    let Some(value) = args.next() else {
+                        return Err(String::from("missing value after --port"));
+                    };
+                    port = parse_port(&value)?;
+                }
                 "--help" | "-h" => {
                     return Err(String::from(
-                        "usage: cpu-game [--client|--server|--mode=client|--mode=server]",
+                        "usage: cpu-game [--client|--server|--host|--mode=client|--mode=server|--mode=host] [--ip <addr>] [--port <port>]",
                     ));
                 }
-                _ => return Err(format!("unrecognized argument: {arg}")),
+                _ => {
+                    if let Some(value) = arg.strip_prefix("--ip=") {
+                        server_ip = value.to_string();
+                    } else if let Some(value) = arg.strip_prefix("--port=") {
+                        port = parse_port(value)?;
+                    } else {
+                        return Err(format!("unrecognized argument: {arg}"));
+                    }
+                }
             }
         }
 
-        Ok(mode)
+        match mode_name.as_str() {
+            "client" => Ok(Self::Client(ClientLaunchOptions {
+                server_ip,
+                server_port: port,
+            })),
+            "server" => Ok(Self::Server(ServerLaunchOptions { port })),
+            "host" => Ok(Self::Host(HostLaunchOptions { port })),
+            _ => Err(format!("unsupported launch mode: {mode_name}")),
+        }
     }
+}
+
+fn parse_port(value: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .map_err(|_| format!("invalid port: {value}"))
 }
 
 fn main() {
@@ -66,12 +121,14 @@ fn main() {
     };
 
     match mode {
-        StartupMode::Client => run_client(),
-        StartupMode::Server => run_server(),
+        StartupMode::Client(options) => run_client(options),
+        StartupMode::Server(options) => run_server(options),
+        StartupMode::Host(options) => run_host(options),
     }
 }
 
-fn run_client() {
+fn run_client(options: ClientLaunchOptions) {
+    let _requested_server_addr = format!("{}:{}", options.server_ip, options.server_port);
     let level = Arc::new(load_embedded_level());
     let texture_manager = texture::TextureManager::load();
 
@@ -94,7 +151,8 @@ fn run_client() {
     event_loop.run_app(&mut app).unwrap();
 }
 
-fn run_server() {
+fn run_server(options: ServerLaunchOptions) {
+    let _bind_port = options.port;
     let level = Arc::new(load_embedded_level());
     let server = build_headless_server(Arc::clone(&level));
     let mut clock_manager = ClockManager::with_server(level, server);
@@ -116,6 +174,15 @@ fn run_server() {
             next_tick = catch_up_limit;
         }
     }
+}
+
+fn run_host(options: HostLaunchOptions) {
+    let _host_port = options.port;
+    let client_options = ClientLaunchOptions {
+        server_ip: String::from(DEFAULT_SERVER_IP),
+        server_port: options.port,
+    };
+    run_client(client_options);
 }
 
 fn build_local_server(
