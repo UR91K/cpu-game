@@ -74,14 +74,19 @@ fn SkyCol(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
     if (rd.y > 0.0) {
         mutableRo.x += 0.5 * tCur;
         var p = 0.01 * (rd.xz * (skyHt - mutableRo.y) / rd.y + mutableRo.xz);
+        
         var w: f32 = 0.65;
         var f: f32 = 0.0;
-        for (var j = 0; j < 4; j++) {
+        
+        // Reduced from 4 to 2 for that "flat" retro look
+        for (var j = 0; j < 2; j++) { 
             f += w * Noisefv2(p);
             w *= 0.5;
-            p *= 2.3;
+            p *= 2.0; // Standard doubling (lacunarity)
         }
-        cloudFac = clamp(5.0 * (f - 0.5) * rd.y - 0.1, 0.0, 1.0);
+        
+        // Slightly boosted the contrast to make the low-detail noise pop
+        cloudFac = clamp(4.0 * (f - 0.4) * rd.y, 0.0, 1.0);
     }
 
     let s = max(dot(rd, sunDir), 0.0);
@@ -107,12 +112,11 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VertOut {
 fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
     let iTime = uniforms.time_resolution.x;
     let iResolution = uniforms.time_resolution.yz;
-    let pitch = uniforms.time_resolution.w;
     let ro = uniforms.camera_origin.xyz;
     let planeLen = uniforms.camera_origin.w;
     let aspect = iResolution.x / iResolution.y;
     let uv = vec2<f32>(
-        (2.0 * fragCoord.x - iResolution.x) / iResolution.y,
+        (2.0 * fragCoord.x - iResolution.x) / iResolution.x,
         (iResolution.y - 2.0 * fragCoord.y) / iResolution.y,
     );
 
@@ -121,14 +125,10 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
     sunDir = normalize(vec3<f32>(0.9, 1.0, 0.4));
     sunCol = vec3<f32>(1.0, 0.9, 0.8);
 
-    let cp = cos(pitch);
-    let sp = sin(pitch);
     let right = normalize(uniforms.camera_right.xyz);
     let forward = normalize(uniforms.camera_forward.xyz);
-    let pitchedForward = normalize(forward * cp + vec3<f32>(0.0, sp, 0.0));
-    let pitchedUp = normalize(vec3<f32>(0.0, cp, 0.0) - forward * sp);
     let verticalPlaneLen = planeLen / aspect;
-    let rd = normalize(pitchedForward + uv.x * planeLen * right + uv.y * verticalPlaneLen * pitchedUp);
+    let rd = normalize(forward + uv.x * planeLen * right + uv.y * verticalPlaneLen * vec3<f32>(0.0, 1.0, 0.0));
 
     var col = SkyCol(ro, rd);
 
@@ -136,7 +136,7 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
         col = vec3<f32>(0.1, 0.15, 0.2);
     }
 
-    col = smoothstep(vec3<f32>(0.0), vec3<f32>(1.0), col);
+    // col = smoothstep(vec3<f32>(0.0), vec3<f32>(1.0), col);
     col = pow(col, vec3<f32>(0.4545));
 
     return vec4<f32>(col, 1.0);
