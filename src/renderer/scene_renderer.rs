@@ -918,6 +918,69 @@ impl SceneRenderer {
             );
         }
 
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_overlay_only_scene_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.overlay_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_overlay_only_encode_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.composite_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.ntsc_encode_pipeline);
+            pass.set_bind_group(0, &self.ntsc_encode_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_overlay_only_decode_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.decoded_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.ntsc_decode_pipeline);
+            pass.set_bind_group(0, &self.ntsc_decode_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
         let (vx, vy, vw, vh) = viewport;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("cpu_game_overlay_only_pass"),
@@ -935,8 +998,8 @@ impl SceneRenderer {
             occlusion_query_set: None,
         });
         pass.set_viewport(vx as f32, vy as f32, vw as f32, vh as f32, 0.0, 1.0);
-        pass.set_pipeline(&self.overlay_pipeline);
-        pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+        pass.set_pipeline(&self.blit_pipeline);
+        pass.set_bind_group(0, &self.blit_bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
 
