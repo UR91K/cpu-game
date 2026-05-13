@@ -259,7 +259,7 @@ fn server_read_loop(
     transport_state: Arc<std::sync::Mutex<net::channel_controller::ChannelTransportState>>,
 ) {
     let mut reader = std::io::BufReader::new(stream);
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
 
     while let Ok(Some(message)) = transport::read_message::<ClientMessage>(&mut reader, &mut buffer) {
         let ClientMessage::Input(input) = message;
@@ -321,7 +321,7 @@ fn client_write_loop(mut stream: TcpStream, input_rx: mpsc::Receiver<input::Inpu
 
 fn client_read_loop(stream: TcpStream, update_tx: mpsc::Sender<runtime::AuthoritativeUpdate>) {
     let mut reader = std::io::BufReader::new(stream);
-    let mut buffer = String::new();
+    let mut buffer = Vec::new();
 
     while let Ok(Some(message)) = transport::read_message::<ServerMessage>(&mut reader, &mut buffer) {
         let ServerMessage::AuthoritativeUpdate(update) = message;

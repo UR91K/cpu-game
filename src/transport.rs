@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::TcpStream;
 
 use serde::de::DeserializeOwned;
@@ -19,23 +19,29 @@ pub enum ServerMessage {
 
 pub fn read_message<T: DeserializeOwned>(
     reader: &mut BufReader<TcpStream>,
-    buffer: &mut String,
+    buffer: &mut Vec<u8>,
 ) -> io::Result<Option<T>> {
     buffer.clear();
-    let bytes = reader.read_line(buffer)?;
-    if bytes == 0 {
-        return Ok(None);
+    let mut len_bytes = [0u8; 4];
+    match reader.read_exact(&mut len_bytes) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(err) => return Err(err),
     }
+    let message_len = u32::from_le_bytes(len_bytes) as usize;
+    buffer.resize(message_len, 0);
+    reader.read_exact(buffer)?;
 
-    let trimmed = buffer.trim_end_matches(['\r', '\n']);
-    let message = serde_json::from_str(trimmed)
+    let message = bincode::deserialize(buffer)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     Ok(Some(message))
 }
 
 pub fn write_message<T: Serialize>(stream: &mut TcpStream, message: &T) -> io::Result<()> {
-    serde_json::to_writer(&mut *stream, message)
+    let encoded = bincode::serialize(message)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    stream.write_all(b"\n")?;
-    stream.flush()
+    let len = u32::try_from(encoded.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "message too large"))?;
+    stream.write_all(&len.to_le_bytes())?;
+    stream.write_all(&encoded)
 }

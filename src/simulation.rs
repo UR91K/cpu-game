@@ -403,6 +403,21 @@ fn update_projectiles(state: &mut GameState, level: &Level, delta: f64) {
             _ => None,
         })
         .collect();
+    let static_blockers: Vec<(EntityId, f64, f64, f64)> = state
+        .entities
+        .iter()
+        .filter_map(|(id, entity)| {
+            blocks_movement(entity).then_some((*id, entity.x, entity.y, entity.radius))
+        })
+        .collect();
+    let pawn_targets: Vec<(EntityId, Option<ControllerId>, f64, f64, f64)> = state
+        .entities
+        .iter()
+        .filter_map(|(id, entity)| match entity.kind {
+            EntityKind::Pawn { owner_id } => Some((*id, owner_id, entity.x, entity.y, entity.radius)),
+            _ => None,
+        })
+        .collect();
 
     for projectile_id in projectile_ids {
         let Some(projectile) = state.entities.get(&projectile_id).cloned() else {
@@ -428,35 +443,17 @@ fn update_projectiles(state: &mut GameState, level: &Level, delta: f64) {
         let next_ttl = ttl_ticks - 1;
 
         let hit_wall = overlaps_wall(level, next_x, next_y, projectile.radius);
-        let hit_prop = state.entities.values().any(|entity| {
-            entity.id != projectile_id
-                && blocks_movement(entity)
-                && circles_overlap(
-                    next_x,
-                    next_y,
-                    projectile.radius,
-                    entity.x,
-                    entity.y,
-                    entity.radius,
-                )
+        let hit_prop = static_blockers.iter().any(|(entity_id, x, y, radius)| {
+            *entity_id != projectile_id
+                && circles_overlap(next_x, next_y, projectile.radius, *x, *y, *radius)
         });
-        let hit_pawn = state.entities.values().any(|entity| match entity.kind {
-            EntityKind::Pawn {
-                owner_id: target_owner,
-            } => {
-                entity.id != projectile_id
-                    && target_owner != owner_id
-                    && circles_overlap(
-                        next_x,
-                        next_y,
-                        projectile.radius,
-                        entity.x,
-                        entity.y,
-                        entity.radius,
-                    )
-            }
-            _ => false,
-        });
+        let hit_pawn = pawn_targets
+            .iter()
+            .any(|(entity_id, target_owner, x, y, radius)| {
+                *entity_id != projectile_id
+                    && *target_owner != owner_id
+                    && circles_overlap(next_x, next_y, projectile.radius, *x, *y, *radius)
+            });
 
         if hit_wall || hit_prop || hit_pawn {
             state.remove_entity(projectile_id);
