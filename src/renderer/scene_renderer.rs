@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use crate::model::Level;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
-use crate::renderer::AFFINE_BLEND;
 use crate::renderer::atlas::build_texture_atlas;
 use crate::renderer::mesh::{
     AtlasRect, build_sprite_vertices, build_static_mesh, create_sprite_buffer,
@@ -19,7 +18,8 @@ pub const SCENE_WIDTH: u32 = 640;
 pub const SCENE_HEIGHT: u32 = 480;
 pub const NEAR_PLANE: f32 = 0.05;
 pub const FAR_PLANE: f32 = 128.0;
-pub const CAMERA_HEIGHT: f32 = 0.5;
+pub const CAMERA_HEIGHT: f32 = 0.6;
+pub const AFFINE_BLEND: f32 = 0.4;
 const SKY_COLOR: &str = "#575ff8"; // Light blue
 
 fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
@@ -259,9 +259,9 @@ impl SceneRenderer {
             contents: bytemuck::bytes_of(&SceneUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
                 affine_params: [AFFINE_BLEND, scene_width as f32, scene_height as f32, 0.0],
-                snap_params: [
-                    scene_width as f32 / 2.0,
-                    scene_height as f32 / 2.0,
+                snap_params: [ // divide these by 2.0 for half res PSX mode
+                    scene_width as f32,
+                    scene_height as f32,
                     0.0,
                     0.0,
                 ],
@@ -705,9 +705,9 @@ impl SceneRenderer {
                     self.scene_height as f32,
                     0.0,
                 ],
-                snap_params: [
-                    self.scene_width as f32 / 2.0,
-                    self.scene_height as f32 / 2.0,
+                snap_params: [ // divide these by 2.0 to match PSX 'high resolution mode' exactly. keep it at full res for low res mode.
+                    self.scene_width as f32, 
+                    self.scene_height as f32,
                     0.0,
                     0.0,
                 ],
