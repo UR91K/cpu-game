@@ -2,6 +2,8 @@ use crate::model::{ControllerId, EntityKind};
 use crate::simulation::GameState;
 use crate::texture::{AnimationStyle, FacingMode, TextureKey, visual_definition};
 
+const WALK_ANIMATION_MIN_SPEED_SQ: f64 = 1.0;
+
 #[derive(Clone, Debug)]
 pub struct RenderScene {
     pub camera: RenderCamera,
@@ -58,20 +60,17 @@ pub fn assemble_scene(
             let render = entity.render.as_ref()?;
             let definition = visual_definition(render.visual);
             let speed_sq = entity.vel_x * entity.vel_x + entity.vel_y * entity.vel_y;
-            let is_moving = speed_sq > 1e-6;
-            let facing_dir = if is_moving {
-                (entity.vel_x, entity.vel_y)
-            } else {
-                match entity.kind {
-                    EntityKind::Pawn {
-                        owner_id: Some(owner_id),
-                    } => state
-                        .players
-                        .get(&owner_id)
-                        .map(|owner| (owner.dir_x, owner.dir_y))
-                        .unwrap_or((0.0, 0.0)),
-                    _ => (0.0, 0.0),
-                }
+            let is_moving = speed_sq > WALK_ANIMATION_MIN_SPEED_SQ;
+            let facing_dir = match entity.kind {
+                EntityKind::Pawn {
+                    owner_id: Some(owner_id),
+                } => state
+                    .players
+                    .get(&owner_id)
+                    .map(|owner| (owner.dir_x, owner.dir_y))
+                    .unwrap_or((0.0, 0.0)),
+                _ if is_moving => (entity.vel_x, entity.vel_y),
+                _ => (0.0, 0.0),
             };
 
             Some(RenderBillboard {
