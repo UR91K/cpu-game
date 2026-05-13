@@ -889,6 +889,57 @@ impl SceneRenderer {
         }
     }
 
+    pub fn render_overlay_only(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        output_view: &wgpu::TextureView,
+        viewport: (u32, u32, u32, u32),
+        overlay: Option<&[u8]>,
+    ) {
+        if let Some(pixels) = overlay {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.overlay_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * self.scene_width),
+                    rows_per_image: Some(self.scene_height),
+                },
+                wgpu::Extent3d {
+                    width: self.scene_width,
+                    height: self.scene_height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        let (vx, vy, vw, vh) = viewport;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("cpu_game_overlay_only_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_viewport(vx as f32, vy as f32, vw as f32, vh as f32, 0.0, 1.0);
+        pass.set_pipeline(&self.overlay_pipeline);
+        pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     pub fn calculate_aspect_preserving_viewport(
         window_width: u32,
         window_height: u32,

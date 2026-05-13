@@ -270,19 +270,35 @@ impl App {
         }
     }
 
-    fn render(&mut self) {
-        let Some(snapshot) = self.runtime.snapshot() else {
-            return;
-        };
+    fn build_connecting_overlay(&mut self) {
+        self.text_layer.clear_all();
 
-        let scene = match render_assembly::assemble_scene(
-            &snapshot.game_state,
-            self.human_id,
-            self.fov_plane_len,
-        ) {
-            Some(scene) => scene,
-            None => return,
-        };
+        let message = "CONNECTING...";
+        let detail = "WAITING FOR SERVER";
+        let message_col = self.text_layer.cols.saturating_sub(message.len()) / 2;
+        let center_row = self.text_layer.rows.saturating_sub(1) / 2;
+        let detail_col = self.text_layer.cols.saturating_sub(detail.len()) / 2;
+
+        place_text_at(
+            &mut self.text_layer,
+            message,
+            message_col,
+            center_row.saturating_sub(1),
+            [255, 255, 255, 255],
+            [0, 0, 0, 0],
+        );
+        place_text_at(
+            &mut self.text_layer,
+            detail,
+            detail_col,
+            center_row.saturating_add(1),
+            rgba_from_hex("#4ab0f0", 255),
+            [0, 0, 0, 0],
+        );
+    }
+
+    fn render(&mut self) {
+        let snapshot = self.runtime.snapshot();
 
         if let Some(state) = &self.state {
             let scene_size = state.renderer.scene_size();
@@ -292,18 +308,31 @@ impl App {
             }
         }
 
+        let scene = snapshot.as_ref().and_then(|snapshot| {
+            render_assembly::assemble_scene(&snapshot.game_state, self.human_id, self.fov_plane_len)
+        });
+
+        let has_snapshot = snapshot.is_some();
+
         self.text_layer.clear_all();
-        if self.show_font_test {
+        if !has_snapshot {
+            self.build_connecting_overlay();
+        } else if self.show_font_test {
             self.build_font_test_overlay();
-        } else {
-            self.build_hud(&scene);
+        } else if let Some(scene) = scene.as_ref() {
+            self.build_hud(scene);
             if self.show_debug_info {
-                self.build_debug_overlay(&scene);
+                self.build_debug_overlay(scene);
             }
         }
+
         let (overlay_width, overlay_height) = self.text_layer.scene_size();
         let mut overlay_buf = vec![0u8; overlay_width * overlay_height * 4];
         self.text_layer.render_to_buf(&mut overlay_buf, &self.font);
+
+        if has_snapshot && scene.is_none() {
+            return;
+        }
 
         let Some(state) = &mut self.state else {
             return;
@@ -339,6 +368,22 @@ impl App {
             state.renderer.scene_size().0,
             state.renderer.scene_size().1,
         );
+
+        let Some(_snapshot) = snapshot else {
+            state.renderer.render_overlay_only(
+                &mut encoder,
+                &view,
+                (vx, vy, vw, vh),
+                Some(overlay_buf.as_slice()),
+            );
+            state
+                .renderer
+                .queue
+                .submit(std::iter::once(encoder.finish()));
+            output.present();
+            return;
+        };
+        let scene = scene.expect("scene should exist when snapshot is available");
 
         state.renderer.render_frame(
             &mut encoder,

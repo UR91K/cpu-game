@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
 use std::env;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,20 +22,18 @@ mod texture;
 
 use app::App;
 use clock::ClockManager;
-use input::{ChannelInputSink, InputSink, LocalInputSink};
+use input::{ChannelInputSink, InputSink};
 use level::load_embedded_level;
 use model::{Level, PickupKind};
 use net::channel_controller::ChannelController;
-use net::local_controller::LocalController;
 use net::server::Server;
-use runtime::{ChannelClientRuntime, GameRuntime, LocalClientRuntime};
+use runtime::{ChannelClientRuntime, GameRuntime};
 use simulation::TICK_DT;
 
-const DEFAULT_SERVER_IP: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3456;
 
 struct ClientLaunchOptions {
-    server_ip: String,
+    server_ip: Option<String>,
     server_port: u16,
 }
 
@@ -57,7 +54,7 @@ enum StartupMode {
 impl StartupMode {
     fn from_args() -> Result<Self, String> {
         let mut mode_name = String::from("client");
-        let mut server_ip = String::from(DEFAULT_SERVER_IP);
+        let mut server_ip = None;
         let mut port = DEFAULT_PORT;
         let mut args = env::args().skip(1);
 
@@ -70,7 +67,7 @@ impl StartupMode {
                     let Some(value) = args.next() else {
                         return Err(String::from("missing value after --ip"));
                     };
-                    server_ip = value;
+                    server_ip = Some(value);
                 }
                 "--port" => {
                     let Some(value) = args.next() else {
@@ -85,7 +82,7 @@ impl StartupMode {
                 }
                 _ => {
                     if let Some(value) = arg.strip_prefix("--ip=") {
-                        server_ip = value.to_string();
+                        server_ip = Some(value.to_string());
                     } else if let Some(value) = arg.strip_prefix("--port=") {
                         port = parse_port(value)?;
                     } else {
@@ -130,18 +127,19 @@ fn main() {
 }
 
 fn run_client(options: ClientLaunchOptions) {
-    let _requested_server_addr = format!("{}:{}", options.server_ip, options.server_port);
+    let server_ip = options.server_ip.unwrap_or_else(|| {
+        eprintln!("client mode requires --ip <addr>");
+        std::process::exit(1);
+    });
+    let _requested_server_addr = format!("{}:{}", server_ip, options.server_port);
     let level = Arc::new(load_embedded_level());
     let texture_manager = texture::TextureManager::load();
 
     const HUMAN_ID: u64 = 1;
-    let input_queue = Arc::new(Mutex::new(VecDeque::new()));
-
-    let server = build_local_server(Arc::clone(&level), Arc::clone(&input_queue), HUMAN_ID);
-
-    let clock_manager = ClockManager::with_server(Arc::clone(&level), server);
-    let client_runtime = LocalClientRuntime::new(clock_manager);
-    let input_sink = LocalInputSink::new(input_queue);
+    let (input_tx, _input_rx) = mpsc::channel();
+    let (_update_tx, update_rx) = mpsc::channel();
+    let client_runtime = ChannelClientRuntime::new(Arc::clone(&level), update_rx);
+    let input_sink = ChannelInputSink::new(input_tx);
 
     run_windowed_client(Box::new(client_runtime), Box::new(input_sink), HUMAN_ID, texture_manager);
 }
@@ -206,25 +204,6 @@ fn run_fixed_tick_loop(mut clock_manager: ClockManager) {
             next_tick = catch_up_limit;
         }
     }
-}
-
-fn build_local_server(
-    level: Arc<Level>,
-    input_queue: Arc<Mutex<VecDeque<input::InputMessage>>>,
-    human_id: u64,
-) -> Server {
-    let mut server = Server::new(Arc::clone(&level));
-
-    let local_client = LocalController::new(
-        human_id,
-        simulation::GameState::new(),
-        input_queue,
-        Arc::clone(&level),
-    );
-
-    server.add_controller(Box::new(local_client), 21.0, 11.0);
-    populate_demo_world(&mut server);
-    server
 }
 
 fn build_headless_server(level: Arc<Level>) -> Server {

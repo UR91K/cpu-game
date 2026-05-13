@@ -130,10 +130,6 @@ impl ClockManager {
     pub fn level(&self) -> &Level {
         self.level.as_ref()
     }
-
-    pub fn level_arc(&self) -> Arc<Level> {
-        Arc::clone(&self.level)
-    }
 }
 
 #[cfg(test)]

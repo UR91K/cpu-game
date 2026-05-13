@@ -73,12 +73,6 @@ impl SnapshotRuntime {
         }
     }
 
-    pub fn with_snapshot(level: Arc<Level>, snapshot: Option<ClientSnapshot>) -> Self {
-        let mut runtime = Self::new(level);
-        runtime.update_snapshot(snapshot);
-        runtime
-    }
-
     pub fn update_snapshot(&mut self, snapshot: Option<ClientSnapshot>) {
         self.snapshot = snapshot;
     }
@@ -97,53 +91,6 @@ impl GameRuntime for SnapshotRuntime {
 
     fn level(&self) -> &Level {
         self.level.as_ref()
-    }
-}
-
-pub struct LocalClientRuntime {
-    authority: ClockManager,
-    client: SnapshotRuntime,
-}
-
-impl LocalClientRuntime {
-    pub fn new(authority: ClockManager) -> Self {
-        let level = authority.level_arc();
-        let snapshot = authority
-            .server_state()
-            .cloned()
-            .map(ClientSnapshot::from_game_state);
-        Self {
-            authority,
-            client: SnapshotRuntime::with_snapshot(level, snapshot),
-        }
-    }
-
-    fn refresh_snapshot(&mut self) {
-        let update = self
-            .authority
-            .server_state()
-            .cloned()
-            .map(AuthoritativeUpdate::from_game_state);
-
-        match update {
-            Some(update) => self.client.apply_update(update),
-            None => self.client.update_snapshot(None),
-        }
-    }
-}
-
-impl GameRuntime for LocalClientRuntime {
-    fn advance(&mut self, frame_dt: f64) {
-        self.authority.advance(frame_dt);
-        self.refresh_snapshot();
-    }
-
-    fn snapshot(&self) -> Option<ClientSnapshot> {
-        self.client.snapshot()
-    }
-
-    fn level(&self) -> &Level {
-        self.client.level()
     }
 }
 
