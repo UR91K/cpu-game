@@ -25,6 +25,15 @@ pub struct SceneUniforms {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct SkyUniforms {
+    pub(crate) time_resolution: [f32; 4],
+    pub(crate) camera_origin: [f32; 4],
+    pub(crate) camera_forward: [f32; 4],
+    pub(crate) camera_right: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct NtscEncodeUniforms {
     source_size: [f32; 2],
     output_size: [f32; 2],

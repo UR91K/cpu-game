@@ -8,7 +8,7 @@ use crate::renderer::mesh::{
     AtlasRect, build_sprite_vertices, build_static_mesh, create_sprite_buffer,
 };
 use crate::renderer::uniforms::{
-    SceneUniforms, SceneVertex, build_decode_uniforms, build_encode_uniforms,
+    SceneUniforms, SceneVertex, SkyUniforms, build_decode_uniforms, build_encode_uniforms,
 };
 use crate::texture::{TextureKey, TextureManager};
 use glam::{Mat4, Vec3};
@@ -20,13 +20,7 @@ pub const NEAR_PLANE: f32 = 0.05;
 pub const FAR_PLANE: f32 = 128.0;
 pub const CAMERA_HEIGHT: f32 = 0.6;
 pub const AFFINE_BLEND: f32 = 0.4;
-const SKY_COLOR: &str = "#575ff8"; // Light blue
-
-fn wgpucolor_from_hex_str(hex: &str) -> wgpu::Color {
-    let [r, g, b] =
-        [1, 3, 5].map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as f64 / 255.0);
-    wgpu::Color { r, g, b, a: 1.0 }
-}
+const SKY_PITCH_RADIANS: f32 = 0.15;
 
 fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: u32) -> Mat4 {
     let aspect = scene_width as f32 / scene_height as f32;
@@ -56,13 +50,16 @@ pub struct SceneRenderer {
     ntsc_decode_bind_group: wgpu::BindGroup,
     blit_bind_group: wgpu::BindGroup,
     overlay_bind_group: wgpu::BindGroup,
+    sky_bind_group: wgpu::BindGroup,
     scene_pipeline: wgpu::RenderPipeline,
+    sky_pipeline: wgpu::RenderPipeline,
     ntsc_encode_pipeline: wgpu::RenderPipeline,
     ntsc_decode_pipeline: wgpu::RenderPipeline,
     blit_pipeline: wgpu::RenderPipeline,
     overlay_pipeline: wgpu::RenderPipeline,
     overlay_texture: wgpu::Texture,
     scene_uniform_buffer: wgpu::Buffer,
+    sky_uniform_buffer: wgpu::Buffer,
     ntsc_encode_uniform_buffer: wgpu::Buffer,
     ntsc_decode_uniform_buffer: wgpu::Buffer,
     wall_vertex_buffer: wgpu::Buffer,
@@ -268,6 +265,16 @@ impl SceneRenderer {
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let sky_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cpu_game_sky_uniforms"),
+            contents: bytemuck::bytes_of(&SkyUniforms {
+                time_resolution: [0.0, scene_width as f32, scene_height as f32, SKY_PITCH_RADIANS],
+                camera_origin: [0.0, CAMERA_HEIGHT, 0.0, 1.0],
+                camera_forward: [0.0, 0.0, 1.0, 0.0],
+                camera_right: [1.0, 0.0, 0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let ntsc_encode_uniform_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("cpu_game_ntsc_encode_uniforms"),
@@ -337,6 +344,28 @@ impl SceneRenderer {
                     resource: scene_uniform_buffer.as_entire_binding(),
                 },
             ],
+        });
+        let sky_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("cpu_game_sky_bgl"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let sky_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cpu_game_sky_bg"),
+            layout: &sky_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sky_uniform_buffer.as_entire_binding(),
+            }],
         });
 
         let blit_bind_group_layout =
@@ -473,6 +502,41 @@ impl SceneRenderer {
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_blit_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_blit.wgsl").into()),
+        });
+        let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cpu_game_sky_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("sky.wgsl").into()),
+        });
+
+        let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cpu_game_sky_pl"),
+            bind_group_layouts: &[&sky_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("cpu_game_sky_pipeline"),
+            layout: Some(&sky_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sky_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sky_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
         });
 
         let scene_pipeline_layout =
@@ -662,13 +726,16 @@ impl SceneRenderer {
             ntsc_decode_bind_group,
             blit_bind_group,
             overlay_bind_group,
+            sky_bind_group,
             scene_pipeline,
+            sky_pipeline,
             ntsc_encode_pipeline,
             ntsc_decode_pipeline,
             blit_pipeline,
             overlay_pipeline,
             overlay_texture,
             scene_uniform_buffer,
+            sky_uniform_buffer,
             ntsc_encode_uniform_buffer,
             ntsc_decode_uniform_buffer,
             wall_vertex_buffer,
@@ -694,6 +761,15 @@ impl SceneRenderer {
         overlay: Option<&[u8]>,
     ) {
         let view_proj = build_view_projection(camera, self.scene_width, self.scene_height);
+        let plane_len =
+            ((camera.plane_x * camera.plane_x) + (camera.plane_y * camera.plane_y)).sqrt() as f32;
+        let right = Vec3::new(camera.plane_x as f32, 0.0, camera.plane_y as f32)
+            .normalize_or_zero();
+        let right = if right.length_squared() > 0.0 {
+            right
+        } else {
+            Vec3::new(camera.dir_y as f32, 0.0, -camera.dir_x as f32)
+        };
         self.queue.write_buffer(
             &self.scene_uniform_buffer,
             0,
@@ -711,6 +787,21 @@ impl SceneRenderer {
                     0.0,
                     0.0,
                 ],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.sky_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&SkyUniforms {
+                time_resolution: [
+                    (anim_elapsed_ms * 0.001) as f32,
+                    self.scene_width as f32,
+                    self.scene_height as f32,
+                    SKY_PITCH_RADIANS,
+                ],
+                camera_origin: [camera.x as f32, CAMERA_HEIGHT, camera.y as f32, plane_len],
+                camera_forward: [camera.dir_x as f32, 0.0, camera.dir_y as f32, 0.0],
+                camera_right: [right.x, right.y, right.z, 0.0],
             }),
         );
         self.queue.write_buffer(
@@ -750,12 +841,33 @@ impl SceneRenderer {
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cpu_game_sky_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.set_bind_group(0, &self.sky_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cpu_game_scene_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpucolor_from_hex_str(SKY_COLOR)),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
