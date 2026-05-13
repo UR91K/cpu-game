@@ -205,7 +205,7 @@ impl App {
     }
 
     fn build_hud(&mut self, _scene: &render_assembly::RenderScene) {
-        let controls = "ESC CAPTURE  WASD MOVE  SPACE/LMB FIRE  F4 FONT  F11 FULLSCREEN";
+        let controls = "ESC CAPTURE  WASD MOVE  SPACE/LMB FIRE  F4 FONT  F5 SHADER  F11 FULLSCREEN";
         let test = "Meow! Test Test Test";
 
         place_text(
@@ -650,6 +650,23 @@ impl App {
             }
         }
     }
+
+    fn reload_shaders(&mut self) {
+        let Some(state) = &mut self.state else {
+            return;
+        };
+
+        let (scene_width, scene_height) = state.renderer.scene_size();
+        state.renderer = SceneRenderer::new(
+            state.renderer.device.clone(),
+            state.renderer.queue.clone(),
+            self.runtime.level(),
+            &state.texture_manager,
+            state.surface_config.format,
+            scene_width,
+            scene_height,
+        );
+    }
 }
 
 impl ApplicationHandler for App {
@@ -779,6 +796,11 @@ impl ApplicationHandler for App {
 
                     if code == KeyCode::F4 && event.state == ElementState::Pressed {
                         self.show_font_test = !self.show_font_test;
+                        return;
+                    }
+
+                    if code == KeyCode::F5 && event.state == ElementState::Pressed {
+                        self.reload_shaders();
                         return;
                     }
 

@@ -86,7 +86,7 @@ fn SkyCol(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
         }
         
         // Slightly boosted the contrast to make the low-detail noise pop
-        cloudFac = clamp(4.0 * (f - 0.4) * rd.y, 0.0, 1.0);
+        cloudFac = clamp(8.0 * (f - 0.4) * rd.y, 0.0, 1.0);
     }
 
     let s = max(dot(rd, sunDir), 0.0);
@@ -136,8 +136,14 @@ fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
         col = vec3<f32>(0.1, 0.15, 0.2);
     }
 
-    // col = smoothstep(vec3<f32>(0.0), vec3<f32>(1.0), col);
-    col = pow(col, vec3<f32>(0.4545));
+    // 1. Boost raw saturation/contrast
+    col = mix(vec3<f32>(0.5), col, 0.4); 
+
+    // 2. Narrow the smoothstep range to "crunch" the values
+    col = smoothstep(vec2<f32>(0.3).xxx, vec2<f32>(0.7).xxx, col);
+
+    // 3. Apply a slightly heavier gamma for deeper blacks
+    col = pow(col, vec3<f32>(1.10)); // Set to 1.0 to see the raw contrast boost
 
     return vec4<f32>(col, 1.0);
 }

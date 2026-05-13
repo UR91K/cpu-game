@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::model::Level;
@@ -21,6 +23,25 @@ pub const FAR_PLANE: f32 = 128.0;
 pub const CAMERA_HEIGHT: f32 = 0.6;
 pub const AFFINE_BLEND: f32 = 0.4;
 const SKY_PITCH_RADIANS: f32 = 0.15;
+
+const SCENE_SHADER_SOURCE: &str = include_str!("gpu_renderer_scene.wgsl");
+const NTSC_ENCODE_SHADER_SOURCE: &str = include_str!("gpu_renderer_ntsc_encode.wgsl");
+const NTSC_DECODE_SHADER_SOURCE: &str = include_str!("gpu_renderer_ntsc_decode.wgsl");
+const BLIT_SHADER_SOURCE: &str = include_str!("gpu_renderer_blit.wgsl");
+const SKY_SHADER_SOURCE: &str = include_str!("sky.wgsl");
+
+fn shader_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("renderer")
+        .join(file_name)
+}
+
+fn load_shader_source(file_name: &str, embedded_source: &'static str) -> Cow<'static, str> {
+    std::fs::read_to_string(shader_path(file_name))
+        .map(Cow::Owned)
+        .unwrap_or_else(|_| Cow::Borrowed(embedded_source))
+}
 
 fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: u32) -> Mat4 {
     let aspect = scene_width as f32 / scene_height as f32;
@@ -489,23 +510,35 @@ impl SceneRenderer {
 
         let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_scene_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_scene.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(load_shader_source(
+                "gpu_renderer_scene.wgsl",
+                SCENE_SHADER_SOURCE,
+            )),
         });
         let ntsc_encode_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_ntsc_encode_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_ntsc_encode.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(load_shader_source(
+                "gpu_renderer_ntsc_encode.wgsl",
+                NTSC_ENCODE_SHADER_SOURCE,
+            )),
         });
         let ntsc_decode_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_ntsc_decode_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_ntsc_decode.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(load_shader_source(
+                "gpu_renderer_ntsc_decode.wgsl",
+                NTSC_DECODE_SHADER_SOURCE,
+            )),
         });
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_blit_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("gpu_renderer_blit.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(load_shader_source(
+                "gpu_renderer_blit.wgsl",
+                BLIT_SHADER_SOURCE,
+            )),
         });
         let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cpu_game_sky_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("sky.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(load_shader_source("sky.wgsl", SKY_SHADER_SOURCE)),
         });
 
         let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
