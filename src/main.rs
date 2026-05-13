@@ -1,5 +1,6 @@
 use std::env;
 use std::net::{TcpListener, TcpStream};
+use std::process::Command;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -154,12 +155,23 @@ fn run_client(options: ClientLaunchOptions) {
 }
 
 fn run_host(options: HostLaunchOptions) {
-    let port = options.port;
-    thread::spawn(move || run_server(ServerLaunchOptions { port }));
+    let current_exe = env::current_exe().unwrap_or_else(|err| {
+        panic!("failed to resolve current executable for host mode: {err}");
+    });
+    let mut server_process = Command::new(current_exe)
+        .arg("server")
+        .arg("--port")
+        .arg(options.port.to_string())
+        .spawn()
+        .unwrap_or_else(|err| panic!("failed to spawn server process for host mode: {err}"));
+
     run_client(ClientLaunchOptions {
         server_ip: Some(String::from("127.0.0.1")),
         server_port: options.port,
     });
+
+    let _ = server_process.kill();
+    let _ = server_process.wait();
 }
 
 fn run_windowed_client(
