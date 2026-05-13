@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     clock::ClockManager,
-    net::{server::Server, tcp::build_tcp_controller},
+    net::{server::Server, tcp::accept_client},
     simulation::TICK_DT,
 };
 
@@ -49,8 +49,8 @@ fn accept_pending_clients(listener: &TcpListener, server: &mut Server) {
         match listener.accept() {
             Ok((stream, _addr)) => {
                 let controller_id = server.allocate_controller_id();
-                let controller = build_tcp_controller(stream, controller_id);
-                server.add_controller(Box::new(controller), 21.0, 11.0);
+                let server_controller = accept_client(stream, controller_id);
+                server.add_controller(Box::new(server_controller.controller), 21.0, 11.0);
             }
             Err(_) => break,
         }

@@ -26,6 +26,15 @@ pub enum ServerMessage {
     AuthoritativeUpdate(AuthoritativeUpdate),
 }
 
+pub struct ClientTransport {
+    pub input_tx: mpsc::Sender<InputMessage>,
+    pub update_rx: mpsc::Receiver<AuthoritativeUpdate>,
+}
+
+pub struct ServerController {
+    pub controller: ChannelController,
+}
+
 pub fn read_message<T: DeserializeOwned>(
     reader: &mut BufReader<TcpStream>,
     buffer: &mut Vec<u8>,
@@ -53,6 +62,21 @@ pub fn write_message<T: Serialize>(stream: &mut TcpStream, message: &T) -> io::R
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "message too large"))?;
     stream.write_all(&len.to_le_bytes())?;
     stream.write_all(&encoded)
+}
+
+pub fn connect_client(server_addr: String) -> ClientTransport {
+    let (input_tx, input_rx) = mpsc::channel();
+    let (update_tx, update_rx) = mpsc::channel();
+    start_tcp_client_transport(server_addr, input_rx, update_tx);
+    ClientTransport {
+        input_tx,
+        update_rx,
+    }
+}
+
+pub fn accept_client(stream: TcpStream, controller_id: u64) -> ServerController {
+    let controller = build_tcp_controller(stream, controller_id);
+    ServerController { controller }
 }
 
 pub fn build_tcp_controller(stream: TcpStream, controller_id: u64) -> ChannelController {

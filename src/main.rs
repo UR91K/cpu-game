@@ -1,7 +1,6 @@
 use std::env;
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::mpsc;
 
 use winit::event_loop::EventLoop;
 
@@ -27,7 +26,6 @@ use level::load_embedded_level;
 use runtime::{ChannelClientRuntime, GameRuntime};
 
 use crate::net::server::build_headless_server;
-use crate::net::tcp::start_tcp_client_transport;
 use crate::server_runner::run_network_server_loop;
 
 const DEFAULT_PORT: u16 = 3456;
@@ -136,13 +134,11 @@ fn run_client(options: ClientLaunchOptions) {
     let texture_manager = texture::TextureManager::load();
 
     const HUMAN_ID: u64 = 1;
-    let (input_tx, input_rx) = mpsc::channel();
-    let (update_tx, update_rx) = mpsc::channel();
+    let transport = net::tcp::connect_client(requested_server_addr);
     let pending_inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
-    start_tcp_client_transport(requested_server_addr, input_rx, update_tx);
     let client_runtime =
-        ChannelClientRuntime::new(Arc::clone(&level), update_rx, Arc::clone(&pending_inputs));
-    let input_sink = ChannelInputSink::new(input_tx, pending_inputs);
+        ChannelClientRuntime::new(Arc::clone(&level), transport.update_rx, Arc::clone(&pending_inputs));
+    let input_sink = ChannelInputSink::new(transport.input_tx, pending_inputs);
 
     run_windowed_client(
         Box::new(client_runtime),
