@@ -73,6 +73,7 @@ pub struct App {
     mouse_capture_mode: MouseCaptureMode,
     ignore_next_motion: bool,
     pending_fire: bool,
+    pending_rotation_delta: f64,
     last_submitted_input: Option<InputMessage>,
     mouse_motion_events: u64,
     ignored_mouse_motion_events: u64,
@@ -109,6 +110,7 @@ impl App {
             mouse_capture_mode: MouseCaptureMode::None,
             ignore_next_motion: false,
             pending_fire: false,
+            pending_rotation_delta: 0.0,
             last_submitted_input: None,
             mouse_motion_events: 0,
             ignored_mouse_motion_events: 0,
@@ -190,27 +192,16 @@ impl App {
             strafe_left: self.keys.contains(&KeyCode::KeyA),
             strafe_right: self.keys.contains(&KeyCode::KeyD),
             fire: std::mem::take(&mut self.pending_fire),
-            rotate_delta: 0.0, // Mouse rotation is accumulated via device events; see below.
+            rotate_delta: std::mem::take(&mut self.pending_rotation_delta),
         };
         self.last_submitted_input = Some(msg.clone());
         self.input_sink.submit(msg);
     }
 
     fn push_rotation(&mut self, angle: f64) {
-        // push a rotation-only message immediately so it's included in the next server tick.
         self.last_rotation_delta = angle;
-        let Some(controller_id) = self.runtime.local_controller_id() else {
-            return;
-        };
-        let msg = InputMessage {
-            controller_id,
-            tick: self.next_input_tick(),
-            rotate_delta: angle,
-            ..Default::default()
-        };
+        self.pending_rotation_delta += angle;
         self.rotation_submit_count += 1;
-        self.last_submitted_input = Some(msg.clone());
-        self.input_sink.submit(msg);
     }
 
     fn build_hud(&mut self, _scene: &render_assembly::RenderScene) {

@@ -47,7 +47,6 @@ pub struct ClientSnapshot {
     pub game_state: GameState,
     pub authoritative_tick: u64,
     pub local_controller_id: Option<ControllerId>,
-    pub sound_events: Vec<SoundEvent>,
     pub transport_debug: Option<TransportDebug>,
     pub prediction_debug: Option<PredictionDebug>,
 }
@@ -63,7 +62,6 @@ impl ClientSnapshot {
             game_state,
             authoritative_tick,
             local_controller_id,
-            sound_events: Vec::new(),
             transport_debug,
             prediction_debug: None,
         }
