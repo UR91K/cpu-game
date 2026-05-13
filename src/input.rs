@@ -1,8 +1,9 @@
 use std::sync::mpsc::Sender;
 
 use crate::model::ControllerId;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct InputMessage {
     pub controller_id: ControllerId,
     #[allow(dead_code)]

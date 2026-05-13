@@ -1,10 +1,12 @@
 #![allow(unused)]
+use serde::{Deserialize, Serialize};
+
 use crate::texture::{AnimationStyle, FacingMode, FloorTexture, VisualId};
 
 pub type ControllerId = u64;
 pub type EntityId = u64;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RenderBody {
     pub visual: VisualId,
     pub width: f32,
@@ -13,12 +15,12 @@ pub struct RenderBody {
     pub animation: AnimationStyle,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PickupKind {
     Medkit,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum EntityKind {
     Pawn {
         owner_id: Option<ControllerId>,
@@ -36,7 +38,7 @@ pub enum EntityKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
     pub x: f64,

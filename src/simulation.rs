@@ -1,6 +1,8 @@
 #![allow(unused)]
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::input::InputMessage;
 use crate::model::{ControllerId, Entity, EntityId, EntityKind, Level, PickupKind, RenderBody};
 use crate::texture::{VisualId, visual_definition};
@@ -18,7 +20,7 @@ const PROJECTILE_TTL_TICKS: u32 = 96;
 const PROJECTILE_DAMAGE: u32 = 1;
 const EPSILON: f64 = 1e-6;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
     pub pawn_id: EntityId,
     pub dir_x: f64,
@@ -35,7 +37,7 @@ impl Player {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameState {
     pub players: HashMap<ControllerId, Player>,
     pub entities: HashMap<EntityId, Entity>,

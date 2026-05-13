@@ -4,9 +4,10 @@ use std::sync::mpsc::Receiver;
 use crate::clock::ClockManager;
 use crate::model::{EntityId, Level};
 use crate::simulation::GameState;
+use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SoundEvent {
     pub entity_id: EntityId,
     pub kind: SoundEventKind,
@@ -15,7 +16,7 @@ pub struct SoundEvent {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum SoundEventKind {
     Footstep,
     Gunshot,
@@ -23,7 +24,7 @@ pub enum SoundEventKind {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientSnapshot {
     pub game_state: GameState,
     pub authoritative_tick: u64,
@@ -41,7 +42,7 @@ impl ClientSnapshot {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuthoritativeUpdate {
     pub snapshot: ClientSnapshot,
 }
