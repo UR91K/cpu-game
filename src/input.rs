@@ -1,4 +1,5 @@
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use crate::model::ControllerId;
 use serde::{Deserialize, Serialize};
@@ -17,22 +18,30 @@ pub struct InputMessage {
     pub rotate_delta: f64,
 }
 
+pub type SharedInputHistory = Arc<Mutex<Vec<InputMessage>>>;
+
 pub trait InputSink {
     fn submit(&mut self, input: InputMessage);
 }
 
 pub struct ChannelInputSink {
     sender: Sender<InputMessage>,
+    pending_inputs: SharedInputHistory,
 }
 
 impl ChannelInputSink {
-    pub fn new(sender: Sender<InputMessage>) -> Self {
-        Self { sender }
+    pub fn new(sender: Sender<InputMessage>, pending_inputs: SharedInputHistory) -> Self {
+        Self {
+            sender,
+            pending_inputs,
+        }
     }
 }
 
 impl InputSink for ChannelInputSink {
     fn submit(&mut self, input: InputMessage) {
-        let _ = self.sender.send(input);
+        if self.sender.send(input.clone()).is_ok() {
+            self.pending_inputs.lock().unwrap().push(input);
+        }
     }
 }

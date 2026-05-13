@@ -3,9 +3,9 @@ use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use crate::clock::ClockManager;
-use crate::input::InputMessage;
+use crate::input::{InputMessage, SharedInputHistory};
 use crate::model::{ControllerId, EntityId, Level};
-use crate::simulation::{GameState, TICK_DT};
+use crate::simulation::{GameState, TICK_DT, tick};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -36,12 +36,20 @@ pub struct TransportDebug {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PredictionDebug {
+    pub acked_input_tick: u64,
+    pub pending_input_count: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClientSnapshot {
     pub game_state: GameState,
     pub authoritative_tick: u64,
     pub local_controller_id: Option<ControllerId>,
     pub sound_events: Vec<SoundEvent>,
     pub transport_debug: Option<TransportDebug>,
+    pub prediction_debug: Option<PredictionDebug>,
 }
 
 impl ClientSnapshot {
@@ -57,6 +65,7 @@ impl ClientSnapshot {
             local_controller_id,
             sound_events: Vec::new(),
             transport_debug,
+            prediction_debug: None,
         }
     }
 }
@@ -131,25 +140,70 @@ pub struct ChannelClientRuntime {
     client: SnapshotRuntime,
     previous_snapshot: Option<ClientSnapshot>,
     last_update_at: Option<Instant>,
+    pending_inputs: SharedInputHistory,
 }
 
 #[allow(dead_code)]
 impl ChannelClientRuntime {
-    pub fn new(level: Arc<Level>, updates: Receiver<AuthoritativeUpdate>) -> Self {
+    pub fn new(
+        level: Arc<Level>,
+        updates: Receiver<AuthoritativeUpdate>,
+        pending_inputs: SharedInputHistory,
+    ) -> Self {
         Self {
             updates,
             client: SnapshotRuntime::new(level),
             previous_snapshot: None,
             last_update_at: None,
+            pending_inputs,
         }
     }
 
     fn drain_updates(&mut self) {
         while let Ok(update) = self.updates.try_recv() {
+            let acked_input_tick = last_acked_input_tick(&update.snapshot);
+            self.pending_inputs
+                .lock()
+                .unwrap()
+                .retain(|input| input.tick > acked_input_tick);
             self.previous_snapshot = self.client.snapshot();
             self.client.apply_update(update);
             self.last_update_at = Some(Instant::now());
         }
+    }
+
+    fn predicted_snapshot(&self) -> Option<ClientSnapshot> {
+        let authoritative = self.client.snapshot()?;
+        let local_controller_id = authoritative.local_controller_id?;
+        let acked_input_tick = last_acked_input_tick(&authoritative);
+        let pending_inputs = self
+            .pending_inputs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|input| {
+                input.controller_id == local_controller_id && input.tick > acked_input_tick
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if pending_inputs.is_empty() {
+            return None;
+        }
+
+        let mut predicted = authoritative.clone();
+        predicted.game_state = tick(
+            &authoritative.game_state,
+            &pending_inputs,
+            self.client.level(),
+            TICK_DT,
+        );
+        predicted.authoritative_tick = authoritative.authoritative_tick;
+        predicted.prediction_debug = Some(PredictionDebug {
+            acked_input_tick,
+            pending_input_count: pending_inputs.len(),
+        });
+        Some(predicted)
     }
 
     fn interpolated_snapshot(&self) -> Option<ClientSnapshot> {
@@ -179,7 +233,9 @@ impl GameRuntime for ChannelClientRuntime {
     }
 
     fn snapshot(&self) -> Option<ClientSnapshot> {
-        self.interpolated_snapshot().or_else(|| self.client.snapshot())
+        self.predicted_snapshot()
+            .or_else(|| self.interpolated_snapshot())
+            .or_else(|| self.client.snapshot())
     }
 
     fn local_controller_id(&self) -> Option<ControllerId> {
@@ -217,6 +273,7 @@ fn interpolate_snapshot(
     alpha: f64,
 ) -> ClientSnapshot {
     let mut blended = current.clone();
+    blended.prediction_debug = None;
 
     for (entity_id, entity) in &mut blended.game_state.entities {
         let Some(previous_entity) = previous.game_state.entities.get(entity_id) else {
@@ -244,6 +301,15 @@ fn interpolate_snapshot(
     }
 
     blended
+}
+
+fn last_acked_input_tick(snapshot: &ClientSnapshot) -> u64 {
+    snapshot
+        .transport_debug
+        .as_ref()
+        .and_then(|debug| debug.last_polled_input.as_ref())
+        .map(|input| input.tick)
+        .unwrap_or(0)
 }
 
 fn lerp(start: f64, end: f64, alpha: f64) -> f64 {

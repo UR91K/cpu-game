@@ -355,6 +355,11 @@ impl App {
                 )
             })
             .unwrap_or_else(|| String::from("RX -----  POLL -----  LR none  LP none"));
+        let prediction = snapshot
+            .prediction_debug
+            .as_ref()
+            .map(|debug| format!("PRED ack={} pending={}", debug.acked_input_tick, debug.pending_input_count))
+            .unwrap_or_else(|| String::from("PRED ack=----- pending=0"));
         let last = format!("LAST {}", last_input);
         place_text(
             &mut self.text_layer,
@@ -423,6 +428,16 @@ impl App {
             VAlign::Top,
             1,
             7,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &prediction,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            8,
             fg,
             bg,
         );
