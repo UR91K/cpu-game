@@ -13,7 +13,7 @@ use crate::input::{InputMessage, InputSink};
 use crate::model::ControllerId;
 use crate::render_assembly;
 use crate::renderer::scene_renderer::{SCENE_HEIGHT, SCENE_WIDTH, SceneRenderer};
-use crate::runtime::GameRuntime;
+use crate::runtime::{ClientSnapshot, GameRuntime};
 use crate::text_layer::{HAlign, TextLayer, VAlign, place_text, place_text_at};
 use crate::texture::TextureManager;
 
@@ -68,10 +68,17 @@ pub struct App {
     fov_plane_len: f64,
     texture_manager: Option<TextureManager>,
     current_tick: u64,
+    input_tick: u64,
     anim_elapsed_ms: f64,
     mouse_capture_mode: MouseCaptureMode,
     ignore_next_motion: bool,
     pending_fire: bool,
+    last_submitted_input: Option<InputMessage>,
+    mouse_motion_events: u64,
+    ignored_mouse_motion_events: u64,
+    last_mouse_dx: f64,
+    last_rotation_delta: f64,
+    rotation_submit_count: u64,
     font: Font,
     text_layer: TextLayer,
     show_font_test: bool,
@@ -97,15 +104,27 @@ impl App {
             fov_plane_len: 0.85,
             texture_manager: Some(texture_manager),
             current_tick: 0,
+            input_tick: 0,
             anim_elapsed_ms: 0.0,
             mouse_capture_mode: MouseCaptureMode::None,
             ignore_next_motion: false,
             pending_fire: false,
+            last_submitted_input: None,
+            mouse_motion_events: 0,
+            ignored_mouse_motion_events: 0,
+            last_mouse_dx: 0.0,
+            last_rotation_delta: 0.0,
+            rotation_submit_count: 0,
             font: Font::load(),
             text_layer: TextLayer::new(SCENE_WIDTH, SCENE_HEIGHT),
             show_font_test: false,
             show_debug_info: false,
         }
+    }
+
+    fn next_input_tick(&mut self) -> u64 {
+        self.input_tick += 1;
+        self.input_tick
     }
 
     fn center_cursor(window: &Window) {
@@ -159,9 +178,13 @@ impl App {
     fn update(&mut self, delta: f64) {
         self.anim_elapsed_ms += delta * 1000.0;
         self.current_tick += 1;
+        self.runtime.advance(delta);
+        let Some(controller_id) = self.runtime.local_controller_id() else {
+            return;
+        };
         let msg = InputMessage {
-            controller_id: self.human_id,
-            tick: self.current_tick,
+            controller_id,
+            tick: self.next_input_tick(),
             forward: self.keys.contains(&KeyCode::KeyW),
             back: self.keys.contains(&KeyCode::KeyS),
             strafe_left: self.keys.contains(&KeyCode::KeyA),
@@ -169,19 +192,24 @@ impl App {
             fire: std::mem::take(&mut self.pending_fire),
             rotate_delta: 0.0, // Mouse rotation is accumulated via device events; see below.
         };
+        self.last_submitted_input = Some(msg.clone());
         self.input_sink.submit(msg);
-        self.runtime.advance(delta);
     }
 
     fn push_rotation(&mut self, angle: f64) {
         // push a rotation-only message immediately so it's included in the next server tick.
-        self.current_tick += 1;
+        self.last_rotation_delta = angle;
+        let Some(controller_id) = self.runtime.local_controller_id() else {
+            return;
+        };
         let msg = InputMessage {
-            controller_id: self.human_id,
-            tick: self.current_tick,
+            controller_id,
+            tick: self.next_input_tick(),
             rotate_delta: angle,
             ..Default::default()
         };
+        self.rotation_submit_count += 1;
+        self.last_submitted_input = Some(msg.clone());
         self.input_sink.submit(msg);
     }
 
@@ -212,7 +240,12 @@ impl App {
         );
     }
     
-    fn build_debug_overlay(&mut self, scene: &render_assembly::RenderScene) {
+    fn build_debug_overlay(
+        &mut self,
+        scene: &render_assembly::RenderScene,
+        snapshot: &ClientSnapshot,
+        viewer_id: ControllerId,
+    ) {
         let fg = [255, 255, 255, 255];
         let bg = [0, 0, 0, 160];
         let capture = match self.mouse_capture_mode {
@@ -221,14 +254,108 @@ impl App {
             MouseCaptureMode::ConfinedWarp => "WARP",
         };
 
+        let runtime_local_id = self.runtime.local_controller_id();
+        let player_ids = {
+            let mut ids: Vec<_> = snapshot.game_state.players.keys().copied().collect();
+            ids.sort_unstable();
+            ids.iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let local_player = snapshot.game_state.players.get(&viewer_id);
+        let local_pawn = local_player.and_then(|player| snapshot.game_state.entities.get(&player.pawn_id));
+        let input_state = format!(
+            "W{} A{} S{} D{} PF{}",
+            if self.keys.contains(&KeyCode::KeyW) { 1 } else { 0 },
+            if self.keys.contains(&KeyCode::KeyA) { 1 } else { 0 },
+            if self.keys.contains(&KeyCode::KeyS) { 1 } else { 0 },
+            if self.keys.contains(&KeyCode::KeyD) { 1 } else { 0 },
+            if self.pending_fire { 1 } else { 0 },
+        );
+        let last_input = self
+            .last_submitted_input
+            .as_ref()
+            .map(|input| {
+                format!(
+                    "id={} tick={} WASD={}{}{}{} fire={} rot={:.3}",
+                    input.controller_id,
+                    input.tick,
+                    if input.forward { '1' } else { '0' },
+                    if input.strafe_left { '1' } else { '0' },
+                    if input.back { '1' } else { '0' },
+                    if input.strafe_right { '1' } else { '0' },
+                    if input.fire { 1 } else { 0 },
+                    input.rotate_delta,
+                )
+            })
+            .unwrap_or_else(|| String::from("none"));
+
         let status = format!(
-            "TICK {:05}  POS {:.1},{:.1}  SPR {:02}  MOUSE {}",
+            "FRAME {:05}  IN {:05}  AUTH {:05}  POS {:.1},{:.1}  SPR {:02}  MOUSE {}",
             self.current_tick,
+            self.input_tick,
+            snapshot.authoritative_tick,
             scene.camera.x,
             scene.camera.y,
             scene.billboards.len(),
             capture,
         );
+        let ids = format!(
+            "HUM {}  VIEW {}  SNAP {:?}  RUN {:?}  PLAYERS [{}]",
+            self.human_id,
+            viewer_id,
+            snapshot.local_controller_id,
+            runtime_local_id,
+            player_ids,
+        );
+        let world = format!(
+            "ENT {:02}  PLAY {:02}  INPUT {}",
+            snapshot.game_state.entities.len(),
+            snapshot.game_state.players.len(),
+            input_state,
+        );
+        let auth = match (local_player, local_pawn) {
+            (Some(player), Some(pawn)) => format!(
+                "DIR {:+.2},{:+.2}  VEL {:+.2},{:+.2}  SPD {:.2}",
+                player.dir_x,
+                player.dir_y,
+                pawn.vel_x,
+                pawn.vel_y,
+                (pawn.vel_x * pawn.vel_x + pawn.vel_y * pawn.vel_y).sqrt(),
+            ),
+            _ => String::from("DIR ??.??,??.??  VEL ??.??,??.??  SPD ??.??"),
+        };
+        let mouse = format!(
+            "MDX {:+.2}  ROT {:+.3}  EVT {:04}  IGN {:04}  SEND {:04}",
+            self.last_mouse_dx,
+            self.last_rotation_delta,
+            self.mouse_motion_events,
+            self.ignored_mouse_motion_events,
+            self.rotation_submit_count,
+        );
+        let transport = snapshot
+            .transport_debug
+            .as_ref()
+            .map(|debug| {
+                format!(
+                    "RX {:05}  POLL {:05}  LR {}  LP {}",
+                    debug.received_count,
+                    debug.polled_count,
+                    debug
+                        .last_received_input
+                        .as_ref()
+                        .map(|input| format!("{}:{:.3}", input.tick, input.rotate_delta))
+                        .unwrap_or_else(|| String::from("none")),
+                    debug
+                        .last_polled_input
+                        .as_ref()
+                        .map(|input| format!("{}:{:.3}", input.tick, input.rotate_delta))
+                        .unwrap_or_else(|| String::from("none")),
+                )
+            })
+            .unwrap_or_else(|| String::from("RX -----  POLL -----  LR none  LP none"));
+        let last = format!("LAST {}", last_input);
         place_text(
             &mut self.text_layer,
             &status,
@@ -236,6 +363,66 @@ impl App {
             VAlign::Top,
             1,
             1,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &ids,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            2,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &world,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            3,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &mouse,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            4,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &auth,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            5,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &last,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            6,
+            fg,
+            bg,
+        );
+        place_text(
+            &mut self.text_layer,
+            &transport,
+            HAlign::Left,
+            VAlign::Top,
+            1,
+            7,
             fg,
             bg,
         );
@@ -308,8 +495,15 @@ impl App {
             }
         }
 
+        let viewer_id = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.local_controller_id.unwrap_or(self.human_id));
         let scene = snapshot.as_ref().and_then(|snapshot| {
-            render_assembly::assemble_scene(&snapshot.game_state, self.human_id, self.fov_plane_len)
+            render_assembly::assemble_scene(
+                &snapshot.game_state,
+                viewer_id.expect("viewer id should exist when snapshot is present"),
+                self.fov_plane_len,
+            )
         });
 
         let has_snapshot = snapshot.is_some();
@@ -322,7 +516,11 @@ impl App {
         } else if let Some(scene) = scene.as_ref() {
             self.build_hud(scene);
             if self.show_debug_info {
-                self.build_debug_overlay(scene);
+                self.build_debug_overlay(
+                    scene,
+                    snapshot.as_ref().expect("snapshot should exist when drawing debug overlay"),
+                    viewer_id.expect("viewer id should exist when drawing debug overlay"),
+                );
             }
         }
 
@@ -610,7 +808,10 @@ impl ApplicationHandler for App {
     ) {
         if self.mouse_capture_mode != MouseCaptureMode::None {
             if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
+                self.mouse_motion_events += 1;
+                self.last_mouse_dx = dx;
                 if self.ignore_next_motion {
+                    self.ignored_mouse_motion_events += 1;
                     self.ignore_next_motion = false;
                     return;
                 }

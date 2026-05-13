@@ -232,22 +232,42 @@ fn allocate_controller_id(server: &Server, next_controller_id: &mut u64) -> u64 
 fn build_tcp_controller(stream: TcpStream, controller_id: u64) -> ChannelController {
     let (input_tx, input_rx) = mpsc::channel();
     let (update_tx, update_rx) = mpsc::channel();
+    let transport_state = Arc::new(std::sync::Mutex::new(
+        net::channel_controller::ChannelTransportState::default(),
+    ));
+
+    stream
+        .set_nonblocking(false)
+        .expect("failed to set accepted tcp stream blocking");
+    let _ = stream.set_nodelay(true);
 
     let read_stream = stream
         .try_clone()
         .expect("failed to clone tcp stream for server reader");
-    thread::spawn(move || server_read_loop(read_stream, input_tx));
+    thread::spawn({
+        let transport_state = Arc::clone(&transport_state);
+        move || server_read_loop(read_stream, input_tx, transport_state)
+    });
     thread::spawn(move || server_write_loop(stream, update_rx));
 
-    ChannelController::new(controller_id, input_rx, update_tx)
+    ChannelController::new(controller_id, input_rx, update_tx, transport_state)
 }
 
-fn server_read_loop(stream: TcpStream, input_tx: mpsc::Sender<input::InputMessage>) {
+fn server_read_loop(
+    stream: TcpStream,
+    input_tx: mpsc::Sender<input::InputMessage>,
+    transport_state: Arc<std::sync::Mutex<net::channel_controller::ChannelTransportState>>,
+) {
     let mut reader = std::io::BufReader::new(stream);
     let mut buffer = String::new();
 
     while let Ok(Some(message)) = transport::read_message::<ClientMessage>(&mut reader, &mut buffer) {
         let ClientMessage::Input(input) = message;
+        {
+            let mut transport_state = transport_state.lock().unwrap();
+            transport_state.received_count += 1;
+            transport_state.last_received_input = Some(input.clone());
+        }
         if input_tx.send(input).is_err() {
             break;
         }
