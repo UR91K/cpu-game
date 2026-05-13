@@ -9,6 +9,7 @@ pub struct Server {
     pub state: GameState,
     pub level: Arc<Level>,
     controllers: Vec<Box<dyn Controller>>,
+    next_controller_id: u64,
 }
 
 impl Server {
@@ -17,6 +18,7 @@ impl Server {
             state: GameState::new(),
             level,
             controllers: Vec::new(),
+            next_controller_id: 1,
         }
     }
 
@@ -77,4 +79,24 @@ impl Server {
             crate::net::bots::wandering::WanderingController::new(id, Arc::clone(&self.level));
         self.add_controller(Box::new(bot), x, y);
     }
+
+    pub fn allocate_controller_id(&mut self) -> u64 {
+        while self.state.players.contains_key(&self.next_controller_id) {
+            self.next_controller_id += 1;
+        }
+        let id = self.next_controller_id;
+        self.next_controller_id += 1;
+        id
+    }
+}
+
+pub fn build_headless_server(level: Arc<Level>) -> Server {
+    let mut server = Server::new(level);
+    populate_demo_world(&mut server);
+    server
+}
+
+fn populate_demo_world(server: &mut Server) {
+    server.spawn_wanderer(2, 18.0, 11.0);
+    server.spawn_pickup(15.5, 11.0, PickupKind::Medkit);
 }

@@ -1,6 +1,7 @@
 pub mod bots;
 pub mod channel_controller;
 pub mod server;
+pub mod tcp;
 
 use crate::input::InputMessage;
 use crate::model::ControllerId;

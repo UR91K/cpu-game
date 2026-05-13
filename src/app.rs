@@ -228,16 +228,16 @@ impl App {
             rgba_from_hex("#000000", 140),
         );
 
-        place_text(
-            &mut self.text_layer,
-            test,
-            HAlign::Center,
-            VAlign::Bottom,
-            0,
-            -1,
-            rgba_from_hex("#f00cca", 255),
-            rgba_from_hex("#23c9f3", 140),
-        );
+        // place_text(
+        //     &mut self.text_layer,
+        //     test,
+        //     HAlign::Center,
+        //     VAlign::Bottom,
+        //     0,
+        //     -1,
+        //     rgba_from_hex("#f00cca", 255),
+        //     rgba_from_hex("#23c9f3", 140),
+        // );
     }
     
     fn build_debug_overlay(

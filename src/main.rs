@@ -1,10 +1,7 @@
 use std::env;
-use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use winit::event_loop::EventLoop;
 
@@ -20,19 +17,19 @@ mod renderer;
 mod runtime;
 mod simulation;
 mod text_layer;
-mod transport;
 mod texture;
+mod server_runner;
+
 
 use app::App;
 use clock::ClockManager;
 use input::{ChannelInputSink, InputSink};
 use level::load_embedded_level;
-use model::{Level, PickupKind};
-use net::channel_controller::ChannelController;
-use net::server::Server;
 use runtime::{ChannelClientRuntime, GameRuntime};
-use simulation::TICK_DT;
-use transport::{ClientMessage, ServerMessage};
+
+use crate::net::server::build_headless_server;
+use crate::net::tcp::start_tcp_client_transport;
+use crate::server_runner::run_network_server_loop;
 
 const DEFAULT_PORT: u16 = 3456;
 
@@ -190,171 +187,4 @@ fn run_server(options: ServerLaunchOptions) {
     let server = build_headless_server(Arc::clone(&level));
     let clock_manager = ClockManager::with_server(level, server);
     run_network_server_loop(clock_manager, options.port);
-}
-
-fn run_network_server_loop(mut clock_manager: ClockManager, port: u16) {
-    let listener = TcpListener::bind(("0.0.0.0", port)).unwrap_or_else(|err| {
-        panic!("failed to bind tcp listener on port {port}: {err}");
-    });
-    listener
-        .set_nonblocking(true)
-        .expect("failed to set tcp listener nonblocking");
-
-    let tick_duration = Duration::from_secs_f64(TICK_DT);
-    let mut next_tick = Instant::now() + tick_duration;
-    let mut next_controller_id = 1u64;
-
-    loop {
-        accept_pending_clients(&listener, clock_manager.server_mut().expect("server should exist"), &mut next_controller_id);
-
-        let now = Instant::now();
-        if now < next_tick {
-            thread::sleep(next_tick - now);
-            continue;
-        }
-
-        clock_manager.advance(TICK_DT);
-        next_tick += tick_duration;
-
-        let catch_up_limit = now + tick_duration;
-        if next_tick < catch_up_limit {
-            next_tick = catch_up_limit;
-        }
-    }
-}
-
-fn accept_pending_clients(listener: &TcpListener, server: &mut Server, next_controller_id: &mut u64) {
-    loop {
-        match listener.accept() {
-            Ok((stream, _addr)) => {
-                let controller_id = allocate_controller_id(server, next_controller_id);
-                let controller = build_tcp_controller(stream, controller_id);
-                server.add_controller(Box::new(controller), 21.0, 11.0);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(_) => break,
-        }
-    }
-}
-
-fn allocate_controller_id(server: &Server, next_controller_id: &mut u64) -> u64 {
-    while server.state.players.contains_key(next_controller_id) {
-        *next_controller_id += 1;
-    }
-    let id = *next_controller_id;
-    *next_controller_id += 1;
-    id
-}
-
-fn build_tcp_controller(stream: TcpStream, controller_id: u64) -> ChannelController {
-    let (input_tx, input_rx) = mpsc::channel();
-    let (update_tx, update_rx) = mpsc::channel();
-    let transport_state = Arc::new(std::sync::Mutex::new(
-        net::channel_controller::ChannelTransportState::default(),
-    ));
-
-    stream
-        .set_nonblocking(false)
-        .expect("failed to set accepted tcp stream blocking");
-    let _ = stream.set_nodelay(true);
-
-    let read_stream = stream
-        .try_clone()
-        .expect("failed to clone tcp stream for server reader");
-    thread::spawn({
-        let transport_state = Arc::clone(&transport_state);
-        move || server_read_loop(read_stream, input_tx, transport_state)
-    });
-    thread::spawn(move || server_write_loop(stream, update_rx));
-
-    ChannelController::new(controller_id, input_rx, update_tx, transport_state)
-}
-
-fn server_read_loop(
-    stream: TcpStream,
-    input_tx: mpsc::Sender<input::InputMessage>,
-    transport_state: Arc<std::sync::Mutex<net::channel_controller::ChannelTransportState>>,
-) {
-    let mut reader = std::io::BufReader::new(stream);
-    let mut buffer = Vec::new();
-
-    while let Ok(Some(message)) = transport::read_message::<ClientMessage>(&mut reader, &mut buffer) {
-        let ClientMessage::Input(input) = message;
-        {
-            let mut transport_state = transport_state.lock().unwrap();
-            transport_state.received_count += 1;
-            transport_state.last_received_input = Some(input.clone());
-        }
-        if input_tx.send(input).is_err() {
-            break;
-        }
-    }
-}
-
-fn server_write_loop(
-    mut stream: TcpStream,
-    update_rx: mpsc::Receiver<runtime::AuthoritativeUpdate>,
-) {
-    while let Ok(update) = update_rx.recv() {
-        if transport::write_message(&mut stream, &ServerMessage::AuthoritativeUpdate(update)).is_err() {
-            break;
-        }
-    }
-}
-
-fn start_tcp_client_transport(
-    server_addr: String,
-    input_rx: mpsc::Receiver<input::InputMessage>,
-    update_tx: mpsc::Sender<runtime::AuthoritativeUpdate>,
-) {
-    thread::spawn(move || {
-        loop {
-            match TcpStream::connect(&server_addr) {
-                Ok(stream) => {
-                    let _ = stream.set_nodelay(true);
-                    let read_stream = match stream.try_clone() {
-                        Ok(stream) => stream,
-                        Err(_) => return,
-                    };
-
-                    let writer = thread::spawn(move || client_write_loop(stream, input_rx));
-                    client_read_loop(read_stream, update_tx);
-                    let _ = writer.join();
-                    return;
-                }
-                Err(_) => thread::sleep(Duration::from_millis(500)),
-            }
-        }
-    });
-}
-
-fn client_write_loop(mut stream: TcpStream, input_rx: mpsc::Receiver<input::InputMessage>) {
-    while let Ok(input) = input_rx.recv() {
-        if transport::write_message(&mut stream, &ClientMessage::Input(input)).is_err() {
-            break;
-        }
-    }
-}
-
-fn client_read_loop(stream: TcpStream, update_tx: mpsc::Sender<runtime::AuthoritativeUpdate>) {
-    let mut reader = std::io::BufReader::new(stream);
-    let mut buffer = Vec::new();
-
-    while let Ok(Some(message)) = transport::read_message::<ServerMessage>(&mut reader, &mut buffer) {
-        let ServerMessage::AuthoritativeUpdate(update) = message;
-        if update_tx.send(update).is_err() {
-            break;
-        }
-    }
-}
-
-fn build_headless_server(level: Arc<Level>) -> Server {
-    let mut server = Server::new(level);
-    populate_demo_world(&mut server);
-    server
-}
-
-fn populate_demo_world(server: &mut Server) {
-    server.spawn_wanderer(2, 18.0, 11.0);
-    server.spawn_pickup(15.5, 11.0, PickupKind::Medkit);
 }
