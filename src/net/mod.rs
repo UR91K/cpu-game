@@ -1,4 +1,5 @@
 pub mod bots;
+pub mod channel_controller;
 pub mod local_controller;
 pub mod server;
 

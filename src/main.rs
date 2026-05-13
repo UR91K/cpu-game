@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 use std::env;
-use std::thread;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use winit::event_loop::EventLoop;
@@ -22,12 +23,13 @@ mod texture;
 
 use app::App;
 use clock::ClockManager;
-use input::LocalInputSink;
+use input::{ChannelInputSink, InputSink, LocalInputSink};
 use level::load_embedded_level;
 use model::{Level, PickupKind};
+use net::channel_controller::ChannelController;
 use net::local_controller::LocalController;
 use net::server::Server;
-use runtime::LocalClientRuntime;
+use runtime::{ChannelClientRuntime, GameRuntime, LocalClientRuntime};
 use simulation::TICK_DT;
 
 const DEFAULT_SERVER_IP: &str = "127.0.0.1";
@@ -141,13 +143,39 @@ fn run_client(options: ClientLaunchOptions) {
     let client_runtime = LocalClientRuntime::new(clock_manager);
     let input_sink = LocalInputSink::new(input_queue);
 
+    run_windowed_client(Box::new(client_runtime), Box::new(input_sink), HUMAN_ID, texture_manager);
+}
+
+fn run_host(options: HostLaunchOptions) {
+    let _host_port = options.port;
+    let level = Arc::new(load_embedded_level());
+    let texture_manager = texture::TextureManager::load();
+
+    const HUMAN_ID: u64 = 1;
+    let (input_tx, input_rx) = mpsc::channel();
+    let (update_tx, update_rx) = mpsc::channel();
+
+    let server_level = Arc::clone(&level);
+    thread::spawn(move || {
+        let server = build_channel_host_server(server_level.clone(), input_rx, update_tx, HUMAN_ID);
+        let clock_manager = ClockManager::with_server(server_level, server);
+        run_fixed_tick_loop(clock_manager);
+    });
+
+    let client_runtime = ChannelClientRuntime::new(Arc::clone(&level), update_rx);
+    let input_sink = ChannelInputSink::new(input_tx);
+
+    run_windowed_client(Box::new(client_runtime), Box::new(input_sink), HUMAN_ID, texture_manager);
+}
+
+fn run_windowed_client(
+    runtime: Box<dyn GameRuntime>,
+    input_sink: Box<dyn InputSink>,
+    human_id: u64,
+    texture_manager: texture::TextureManager,
+) {
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App::new(
-        Box::new(client_runtime),
-        Box::new(input_sink),
-        HUMAN_ID,
-        texture_manager,
-    );
+    let mut app = App::new(runtime, input_sink, human_id, texture_manager);
     event_loop.run_app(&mut app).unwrap();
 }
 
@@ -155,7 +183,11 @@ fn run_server(options: ServerLaunchOptions) {
     let _bind_port = options.port;
     let level = Arc::new(load_embedded_level());
     let server = build_headless_server(Arc::clone(&level));
-    let mut clock_manager = ClockManager::with_server(level, server);
+    let clock_manager = ClockManager::with_server(level, server);
+    run_fixed_tick_loop(clock_manager);
+}
+
+fn run_fixed_tick_loop(mut clock_manager: ClockManager) {
     let tick_duration = Duration::from_secs_f64(TICK_DT);
     let mut next_tick = Instant::now() + tick_duration;
 
@@ -174,15 +206,6 @@ fn run_server(options: ServerLaunchOptions) {
             next_tick = catch_up_limit;
         }
     }
-}
-
-fn run_host(options: HostLaunchOptions) {
-    let _host_port = options.port;
-    let client_options = ClientLaunchOptions {
-        server_ip: String::from(DEFAULT_SERVER_IP),
-        server_port: options.port,
-    };
-    run_client(client_options);
 }
 
 fn build_local_server(
@@ -206,6 +229,20 @@ fn build_local_server(
 
 fn build_headless_server(level: Arc<Level>) -> Server {
     let mut server = Server::new(level);
+    populate_demo_world(&mut server);
+    server
+}
+
+fn build_channel_host_server(
+    level: Arc<Level>,
+    input_rx: mpsc::Receiver<input::InputMessage>,
+    update_tx: mpsc::Sender<runtime::AuthoritativeUpdate>,
+    human_id: u64,
+) -> Server {
+    let mut server = Server::new(Arc::clone(&level));
+    let controller = ChannelController::new(human_id, input_rx, update_tx);
+
+    server.add_controller(Box::new(controller), 21.0, 11.0);
     populate_demo_world(&mut server);
     server
 }

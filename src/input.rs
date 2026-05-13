@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use crate::model::ControllerId;
@@ -33,5 +34,21 @@ impl LocalInputSink {
 impl InputSink for LocalInputSink {
     fn submit(&mut self, input: InputMessage) {
         self.queue.lock().unwrap().push_back(input);
+    }
+}
+
+pub struct ChannelInputSink {
+    sender: Sender<InputMessage>,
+}
+
+impl ChannelInputSink {
+    pub fn new(sender: Sender<InputMessage>) -> Self {
+        Self { sender }
+    }
+}
+
+impl InputSink for ChannelInputSink {
+    fn submit(&mut self, input: InputMessage) {
+        let _ = self.sender.send(input);
     }
 }
