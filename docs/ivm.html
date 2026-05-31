@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IVM — Integer Vertex Map / Design Document</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a12;
+    --bg2: #0f0f1a;
+    --bg3: #141425;
+    --border: #2a2a4a;
+    --border-bright: #4a4a8a;
+    --text: #c8c8e8;
+    --text-dim: #6868a0;
+    --text-bright: #e8e8ff;
+    --pink: #ff3c96;
+    --green: #3cff78;
+    --teal: #3cffe0;
+    --yellow: #ffdc3c;
+    --purple: #c83cff;
+    --orange: #ff783c;
+    --blue: #3c96ff;
+    --red: #ff3c3c;
+
+    /* VIC-20 palette */
+    --vic-black:      #000000;
+    --vic-white:      #ffffff;
+    --vic-brown:      #a8734a;
+    --vic-peach:      #e9b287;
+    --vic-dk-red:     #772d26;
+    --vic-lt-red:     #b66862;
+    --vic-lt-teal:    #85d4dc;
+    --vic-lt-cyan:    #c5ffff;
+    --vic-dk-purple:  #a85fb4;
+    --vic-lt-purple:  #e99df5;
+    --vic-dk-green:   #559e4a;
+    --vic-lt-green:   #92df87;
+    --vic-dk-blue:    #42348b;
+    --vic-lt-blue:    #7e70ca;
+    --vic-yellow:     #bdcc71;
+    --vic-lt-yellow:  #ffffb0;
+
+    /* axis plane colours — VIC-20 sourced */
+    --axis-x:         #b66862;  /* vic lt-red — dusty, not aggressive */
+    --axis-x-bright:  #e9b287;  /* vic peach */
+    --axis-y:         #bdcc71;  /* vic yellow-green — VIC-20 energy */
+    --axis-y-bright:  #ffffb0;  /* vic lt-yellow */
+    --axis-z:         #42348b;  /* vic dk-blue — muted purple */
+    --axis-z-bright:  #7e70ca;  /* vic lt-blue */
+    --axis-ground:    #559e4a;  /* vic dk-green — phosphor floor */
+
+    /* object palette — VIC-20 sourced */
+    --obj0: #e99df5;  /* wrong lilac */
+    --obj1: #92df87;  /* phosphor green */
+    --obj2: #c5ffff;  /* blown-out cyan */
+    --obj3: #e9b287;  /* warm terracotta */
+    --obj4: #7e70ca;  /* washed purple */
+    --obj5: #ffffb0;  /* pale wrong yellow */
+    --obj6: #85d4dc;  /* muted teal */
+    --obj7: #a8734a;  /* dark brown */
+
+    /* vertex sphere colours — VIC-20 sourced */
+    --vert-unselected: #b66862;  /* vic lt-red */
+    --vert-selected:   #ffffb0;  /* vic lt-yellow, pulses to white */
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Courier Prime', monospace;
+    font-size: 15px;
+    line-height: 1.7;
+    padding: 0;
+  }
+
+  .scanlines {
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 3rem 4rem 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(60,255,224,0.015) 40px, rgba(60,255,224,0.015) 41px),
+      repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(60,255,224,0.015) 40px, rgba(60,255,224,0.015) 41px);
+  }
+
+  .header-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--teal);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  h1 {
+    font-family: 'VT323', monospace;
+    font-size: 72px;
+    color: var(--text-bright);
+    line-height: 1;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.05em;
+  }
+
+  .header-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+
+  .header-sub span {
+    color: var(--yellow);
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-wrap: wrap;
+  }
+
+  .status-item { display: flex; gap: 0.5rem; align-items: center; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot-green { background: var(--green); box-shadow: 0 0 4px var(--green); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-dim { background: var(--border-bright); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: calc(100vh - 200px);
+  }
+
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 2rem 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .sidebar-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    padding: 0 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .nav-item {
+    display: block;
+    padding: 0.4rem 1.5rem;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    border-left: 2px solid transparent;
+    transition: all 0.1s;
+  }
+
+  .nav-item:hover { color: var(--teal); border-left-color: var(--teal); background: rgba(60,255,224,0.04); }
+  .nav-item.active { color: var(--teal); border-left-color: var(--teal); }
+
+  .nav-section { margin-bottom: 1.5rem; }
+
+  .content {
+    padding: 3rem 4rem;
+    max-width: 900px;
+  }
+
+  section { margin-bottom: 4rem; }
+
+  h2 {
+    font-family: 'VT323', monospace;
+    font-size: 42px;
+    color: var(--text-bright);
+    margin-bottom: 0.25rem;
+    line-height: 1;
+  }
+
+  .section-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .section-tag::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  h3 {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--yellow);
+    letter-spacing: 0.1em;
+    margin: 2rem 0 0.75rem;
+    text-transform: uppercase;
+  }
+
+  p { margin-bottom: 1rem; color: var(--text); }
+
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    background: rgba(60,255,224,0.04);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .callout.yellow { border-left-color: var(--yellow); background: rgba(255,220,60,0.04); }
+  .callout.pink { border-left-color: var(--pink); background: rgba(255,60,150,0.04); }
+  .callout.purple { border-left-color: var(--purple); background: rgba(200,60,255,0.04); }
+
+  .callout-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--teal);
+    letter-spacing: 0.2em;
+    margin-bottom: 0.5rem;
+  }
+
+  .callout.yellow .callout-label { color: var(--yellow); }
+  .callout.pink .callout-label { color: var(--pink); }
+  .callout.purple .callout-label { color: var(--purple); }
+
+  pre, code {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+  }
+
+  pre {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    line-height: 1.6;
+    border-radius: 4px;
+  }
+
+  code {
+    background: var(--bg3);
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--teal);
+    font-size: 12px;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+  }
+
+  .kw { color: var(--purple); }
+  .ty { color: var(--teal); }
+  .st { color: var(--green); }
+  .cm { color: var(--text-dim); font-style: italic; }
+  .nm { color: var(--yellow); }
+  .op { color: var(--pink); }
+  .nu { color: var(--orange); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 1.25rem;
+    border-radius: 4px;
+  }
+
+  .card-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  .format-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    margin: 1rem 0;
+  }
+
+  .format-table th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-bright);
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .format-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .format-table tr:last-child td { border-bottom: none; }
+  .format-table .bytes { color: var(--orange); }
+  .format-table .name { color: var(--teal); }
+  .format-table .note { color: var(--text-dim); font-size: 11px; }
+
+  .obj-palette {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+  }
+
+  .obj-swatch {
+    width: 40px;
+    height: 40px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: rgba(0,0,0,0.7);
+    font-weight: bold;
+  }
+
+  .state-machine {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 1rem 0;
+  }
+
+  .state {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 0.25rem;
+  }
+
+  .state-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--yellow);
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+
+  .state-transitions {
+    list-style: none;
+    padding: 0;
+  }
+
+  .state-transitions li {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0.15rem 0;
+    padding-left: 1rem;
+    position: relative;
+  }
+
+  .state-transitions li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--border-bright);
+  }
+
+  .state-transitions li .trigger { color: var(--teal); }
+  .state-transitions li .result { color: var(--text); }
+
+  .render-pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1.5rem 0;
+  }
+
+  .pipeline-pass {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  .pass-num {
+    font-family: 'VT323', monospace;
+    font-size: 28px;
+    color: var(--border-bright);
+    min-width: 24px;
+    line-height: 1;
+  }
+
+  .pass-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-bright);
+    letter-spacing: 0.05em;
+    min-width: 180px;
+  }
+
+  .pass-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .pass-tag {
+    margin-left: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.1em;
+  }
+
+  .tag-existing { background: rgba(60,255,224,0.1); color: var(--teal); border: 1px solid rgba(60,255,224,0.3); }
+  .tag-new { background: rgba(255,60,150,0.1); color: var(--pink); border: 1px solid rgba(255,60,150,0.3); }
+  .tag-modified { background: rgba(255,220,60,0.1); color: var(--yellow); border: 1px solid rgba(255,220,60,0.3); }
+
+  .view-modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .view-mode-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 1rem;
+    border-radius: 4px;
+  }
+
+  .view-mode-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  .view-mode-card:nth-child(1) .view-mode-name { color: var(--purple); }
+  .view-mode-card:nth-child(2) .view-mode-name { color: var(--pink); }
+  .view-mode-card:nth-child(3) .view-mode-name { color: var(--teal); }
+  .view-mode-card:nth-child(4) .view-mode-name { color: var(--green); }
+
+  .view-mode-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+
+  .inline-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.08em;
+    vertical-align: middle;
+  }
+
+  .tag-rust { background: rgba(255,120,60,0.15); color: var(--orange); border: 1px solid rgba(255,120,60,0.3); }
+  .tag-wgsl { background: rgba(60,150,255,0.15); color: var(--blue); border: 1px solid rgba(60,150,255,0.3); }
+  .tag-format { background: rgba(200,60,255,0.15); color: var(--purple); border: 1px solid rgba(200,60,255,0.3); }
+
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem 4rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .blink {
+    animation: blink 1.2s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .content { padding: 2rem; }
+    .header { padding: 2rem; }
+    h1 { font-size: 48px; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .view-modes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+
+<div class="header">
+  <div class="header-tag">design document / v0.1 / in progress</div>
+  <h1>IVM</h1>
+  <div class="header-sub">integer vertex map &nbsp;—&nbsp; <span>ps1-style 3d level format &amp; editor</span></div>
+  <div class="status-bar">
+    <div class="status-item"><div class="status-dot dot-green"></div>format spec: active</div>
+    <div class="status-item"><div class="status-dot dot-yellow"></div>editor: design phase</div>
+    <div class="status-item"><div class="status-dot dot-dim"></div>runtime: refactor pending</div>
+    <div class="status-item"><div class="status-dot dot-dim"></div>renderer: wgpu / rust</div>
+    <div class="status-item"><div class="status-dot dot-green"></div>aesthetic: weirdcore / liminal</div>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-section">
+      <div class="sidebar-label">overview</div>
+      <a href="#philosophy" class="nav-item">philosophy</a>
+      <a href="#context" class="nav-item">context &amp; history</a>
+    </div>
+    <div class="nav-section">
+      <div class="sidebar-label">format</div>
+      <a href="#geometry" class="nav-item">geometry model</a>
+      <a href="#objects" class="nav-item">map objects</a>
+      <a href="#binary" class="nav-item">binary layout</a>
+      <a href="#textures" class="nav-item">texture storage</a>
+      <a href="#entities" class="nav-item">entities</a>
+    </div>
+    <div class="nav-section">
+      <div class="sidebar-label">editor</div>
+      <a href="#editor-design" class="nav-item">design language</a>
+      <a href="#vic20-palette" class="nav-item">VIC-20 palette</a>
+      <a href="#interaction" class="nav-item">interaction model</a>
+      <a href="#view-modes" class="nav-item">view modes</a>
+      <a href="#state-machine" class="nav-item">state machine</a>
+    </div>
+    <div class="nav-section">
+      <div class="sidebar-label">renderer</div>
+      <a href="#pipeline" class="nav-item">render pipeline</a>
+      <a href="#vertex" class="nav-item">vertex format</a>
+      <a href="#shader" class="nav-item">shader changes</a>
+    </div>
+    <div class="nav-section">
+      <div class="sidebar-label">runtime</div>
+      <a href="#data-model" class="nav-item">data model</a>
+      <a href="#edit-game" class="nav-item">edit/game switch</a>
+    </div>
+  </nav>
+
+  <main class="content">
+
+    <section id="philosophy">
+      <h2>Philosophy</h2>
+      <div class="section-tag">core design intent</div>
+
+      <p>This is a Wolfenstein-style 2.5D game being evolved into a Quake-style fully 3D game, while preserving and deepening a PS1 aesthetic. The key constraint — and the key design decision — is that all geometry is authored in integer coordinates (ℤ³). This isn't a workaround; it's the point.</p>
+
+      <div class="callout">
+        <div class="callout-label">design principle</div>
+        The PS1's GTE had no floating point. Vertex snapping, affine texture warping, and integer coordinate quantization were hardware realities. IVM makes those realities first-class citizens of the authoring format, not just runtime effects.
+      </div>
+
+      <p>The smallest representable unit is approximately 10cm in world space, giving clean integer arithmetic for human-scale architecture (a 2m doorway = 20 units, a 1.8m character = 18 units).</p>
+
+      <div class="callout yellow">
+        <div class="callout-label">aesthetic target</div>
+        Weirdcore / liminal space. LSD Dream Emulator. Doko Demo Issyo. The old juggling raytracer. Certain Garry's Mod art maps. The Amazing Digital Circus. Petscop. An ARG that doesn't explain itself.
+      </div>
+    </section>
+
+    <section id="context">
+      <h2>Context</h2>
+      <div class="section-tag">where we came from</div>
+
+      <p>The previous map format (<code>.amap</code>) was a 2D tile grid — each cell described a column of space with a wall type, floor texture, ceiling texture, prop, and special trigger. 8 bytes per tile, Wolfenstein-style.</p>
+
+      <div class="callout">
+        <div class="callout-label">old model</div>
+        Space was <em>implicit</em>. A tile IS a wall or IS a floor. Geometry was synthesized from the grid at runtime. Walls could only be axis-aligned, height was uniform, no slopes, no overhangs.
+      </div>
+
+      <div class="callout pink">
+        <div class="callout-label">new model</div>
+        Space is <em>explicit</em>. Vertices, edges, faces stored directly. The renderer draws what is there. No grid, no implied geometry. Full 3D. Camera pitch unlocked.
+      </div>
+
+      <p>The rendering pipeline is already 3D — rasterized triangles via wgpu, with an authentic vertex snap shader, affine texture warping blend, and FIR NTSC encode/decode passes. The camera was simply locked to no pitch. The transition is primarily a format and mesh-generation change, not a renderer change.</p>
+    </section>
+
+    <section id="geometry">
+      <h2>Geometry Model</h2>
+      <div class="section-tag">format / geometry</div>
+
+      <p>IVM geometry is a standard indexed mesh, but with the constraint that all vertex positions are integers. Not a voxel grid, not axis-aligned only — a fully general mesh where coordinates happen to be in ℤ³.</p>
+
+      <pre><span class="cm">// Formal description</span>
+<span class="ty">Vertices</span>  <span class="op">=</span> points <span class="kw">in</span> ℤ³
+<span class="ty">Edges</span>     <span class="op">=</span> connect two vertices (by index)
+<span class="ty">Faces</span>     <span class="op">=</span> ordered list of vertex indices (winding defines normal direction)
+<span class="ty">Normals</span>   <span class="op">=</span> auto-generated from face winding (cross product, normalized at build time)
+<span class="ty">UVs</span>       <span class="op">=</span> projected at load time (dominant-axis planar projection)
+           <span class="cm">// explicit per-face-vertex UVs can be added later</span></pre>
+
+      <h3>Unit Scale</h3>
+      <p>1 IVM unit ≈ 10cm in world space. This gives clean integers for common measurements and is dense enough for fine architectural detail without needing sub-unit precision.</p>
+
+      <table class="format-table">
+        <tr><th>real measurement</th><th>ivm units</th></tr>
+        <tr><td>doorway height (2m)</td><td class="bytes">20</td></tr>
+        <tr><td>character height (1.8m)</td><td class="bytes">18</td></tr>
+        <tr><td>ceiling height (2.5m)</td><td class="bytes">25</td></tr>
+        <tr><td>hallway width (1.2m)</td><td class="bytes">12</td></tr>
+        <tr><td>step height (18cm)</td><td class="bytes">2</td></tr>
+      </table>
+
+      <h3>Normals</h3>
+      <p>Computed automatically from face winding at mesh build time. Never stored in the authored format. The cross product stays integer until normalization:</p>
+
+      <pre><span class="kw">fn</span> <span class="nm">face_normal</span>(v0: [<span class="ty">i32</span>; <span class="nu">3</span>], v1: [<span class="ty">i32</span>; <span class="nu">3</span>], v2: [<span class="ty">i32</span>; <span class="nu">3</span>]) <span class="op">-></span> [<span class="ty">f32</span>; <span class="nu">3</span>] {
+    <span class="kw">let</span> e0 <span class="op">=</span> [v1[<span class="nu">0</span>]<span class="op">-</span>v0[<span class="nu">0</span>], v1[<span class="nu">1</span>]<span class="op">-</span>v0[<span class="nu">1</span>], v1[<span class="nu">2</span>]<span class="op">-</span>v0[<span class="nu">2</span>]];
+    <span class="kw">let</span> e1 <span class="op">=</span> [v2[<span class="nu">0</span>]<span class="op">-</span>v0[<span class="nu">0</span>], v2[<span class="nu">1</span>]<span class="op">-</span>v0[<span class="nu">1</span>], v2[<span class="nu">2</span>]<span class="op">-</span>v0[<span class="nu">2</span>]];
+    <span class="cm">// cross product stays integer</span>
+    <span class="kw">let</span> n <span class="op">=</span> [
+        (e0[<span class="nu">1</span>]<span class="op">*</span>e1[<span class="nu">2</span>] <span class="op">-</span> e0[<span class="nu">2</span>]<span class="op">*</span>e1[<span class="nu">1</span>]) <span class="kw">as</span> <span class="ty">f32</span>,
+        (e0[<span class="nu">2</span>]<span class="op">*</span>e1[<span class="nu">0</span>] <span class="op">-</span> e0[<span class="nu">0</span>]<span class="op">*</span>e1[<span class="nu">2</span>]) <span class="kw">as</span> <span class="ty">f32</span>,
+        (e0[<span class="nu">0</span>]<span class="op">*</span>e1[<span class="nu">1</span>] <span class="op">-</span> e0[<span class="nu">1</span>]<span class="op">*</span>e1[<span class="nu">0</span>]) <span class="kw">as</span> <span class="ty">f32</span>,
+    ];
+    <span class="kw">let</span> len <span class="op">=</span> (n[<span class="nu">0</span>]<span class="op">*</span>n[<span class="nu">0</span>] <span class="op">+</span> n[<span class="nu">1</span>]<span class="op">*</span>n[<span class="nu">1</span>] <span class="op">+</span> n[<span class="nu">2</span>]<span class="op">*</span>n[<span class="nu">2</span>]).sqrt();
+    [n[<span class="nu">0</span>]<span class="op">/</span>len, n[<span class="nu">1</span>]<span class="op">/</span>len, n[<span class="nu">2</span>]<span class="op">/</span>len]
+}</pre>
+    </section>
+
+    <section id="objects">
+      <h2>Map Objects</h2>
+      <div class="section-tag">format / objects</div>
+
+      <p>Geometry is grouped into <em>map objects</em> — named collections of vertices and faces. Each object has a unique ID. Objects are the authoring unit; at runtime they can be preserved or flattened.</p>
+
+      <h3>Merge Behaviour</h3>
+      <p>When an edge is drawn between a vertex in object A and a vertex in object B, the newer object is absorbed into the older one. All of the newer object's vertices are reindexed into the older object's vertex list. The older object's ID and properties are preserved.</p>
+
+      <div class="callout yellow">
+        <div class="callout-label">union-find</div>
+        This is essentially a union-find / disjoint set structure applied to geometry. Each object is a connected component. Connecting two components merges them, with the older ID as canonical.
+      </div>
+
+      <h3>Runtime vs Edit Time</h3>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">edit time</div>
+          <p style="font-size:13px; color:var(--text-dim)">Object boundaries are meaningful. Merge-on-connect is active. Object focus mode isolates one object. Per-object colours in view modes.</p>
+        </div>
+        <div class="card">
+          <div class="card-title">runtime</div>
+          <p style="font-size:13px; color:var(--text-dim)">Objects are preserved in memory to support seamless edit/game switching. <code>MapMesh</code> is a derived flat cache rebuilt when geometry changes.</p>
+        </div>
+      </div>
+
+      <h3>Cylinder Primitive</h3>
+      <p>A procedural primitive defined by two vertex indices (axis endpoints), an integer radius, and a side count. Generated ring vertices are computed at load time in fixed-point space. The integer source data stays clean.</p>
+
+      <pre><span class="kw">struct</span> <span class="ty">CylinderPrimitive</span> {
+    v_start: <span class="ty">u16</span>,    <span class="cm">// index into object vertex list</span>
+    v_end:   <span class="ty">u16</span>,
+    radius:  <span class="ty">i32</span>,    <span class="cm">// integer units</span>
+    sides:   <span class="ty">u8</span>,     <span class="cm">// typically 8 or 12</span>
+}</pre>
+
+      <p>Note: this primitive doubles as the visual pipe representation of edges in the editor (see Editor section).</p>
+    </section>
+
+    <section id="binary">
+      <h2>Binary Layout</h2>
+      <div class="section-tag">format / binary</div>
+
+      <p>File extension: <code>.ivm</code> — Integer Vertex Map. Single self-contained file. No companion files, no external texture references.</p>
+
+      <table class="format-table">
+        <tr><th>offset</th><th>size</th><th>field</th><th>notes</th></tr>
+        <tr>
+          <td class="bytes">0</td>
+          <td class="bytes">4</td>
+          <td class="name">magic</td>
+          <td class="note">"IVM\0"</td>
+        </tr>
+        <tr>
+          <td class="bytes">4</td>
+          <td class="bytes">2</td>
+          <td class="name">version</td>
+          <td class="note">u16, currently 1</td>
+        </tr>
+        <tr>
+          <td class="bytes">6</td>
+          <td class="bytes">4</td>
+          <td class="name">n_textures</td>
+          <td class="note">u32</td>
+        </tr>
+        <tr>
+          <td class="bytes">10</td>
+          <td class="bytes">4</td>
+          <td class="name">n_objects</td>
+          <td class="note">u32</td>
+        </tr>
+        <tr>
+          <td class="bytes">14</td>
+          <td class="bytes">4</td>
+          <td class="name">n_entities</td>
+          <td class="note">u32</td>
+        </tr>
+        <tr>
+          <td class="bytes">18</td>
+          <td class="bytes">14</td>
+          <td class="name">reserved</td>
+          <td class="note">padding to 32-byte header</td>
+        </tr>
+        <tr>
+          <td class="bytes">32+</td>
+          <td class="bytes">variable</td>
+          <td class="name">texture section</td>
+          <td class="note">see Texture Storage</td>
+        </tr>
+        <tr>
+          <td class="bytes">—</td>
+          <td class="bytes">variable</td>
+          <td class="name">string table</td>
+          <td class="note">length-prefixed name entries</td>
+        </tr>
+        <tr>
+          <td class="bytes">—</td>
+          <td class="bytes">variable</td>
+          <td class="name">object section</td>
+          <td class="note">per-object vertex + face data</td>
+        </tr>
+        <tr>
+          <td class="bytes">—</td>
+          <td class="bytes">variable</td>
+          <td class="name">entity section</td>
+          <td class="note">typed entity list</td>
+        </tr>
+      </table>
+
+      <h3>Object Section (per object)</h3>
+      <table class="format-table">
+        <tr><th>size</th><th>field</th><th>notes</th></tr>
+        <tr><td class="bytes">4</td><td class="name">object_id</td><td class="note">u32, stable across merges</td></tr>
+        <tr><td class="bytes">1</td><td class="name">name_idx</td><td class="note">index into string table</td></tr>
+        <tr><td class="bytes">4</td><td class="name">n_vertices</td><td class="note">u32</td></tr>
+        <tr><td class="bytes">4</td><td class="name">n_faces</td><td class="note">u32</td></tr>
+        <tr><td class="bytes">n×12</td><td class="name">vertices</td><td class="note">i32 x, i32 y, i32 z per vertex</td></tr>
+        <tr><td class="bytes">n×4</td><td class="name">vertex_colors</td><td class="note">u8 RGBA per vertex, default 255,255,255,255</td></tr>
+        <tr><td class="bytes">variable</td><td class="name">faces</td><td class="note">u8 n_verts, n×u16 indices, u16 texture_id, u8 flags</td></tr>
+      </table>
+
+      <div class="callout">
+        <div class="callout-label">note on faces</div>
+        Variable-length faces are fine at this scale. Alternatively, triangulate everything at export time for fixed 3 indices per face. Flags byte: bit 0 = sky, bit 1 = liquid, bit 2 = trigger, bit 3 = no-clip.
+      </div>
+    </section>
+
+    <section id="textures">
+      <h2>Texture Storage</h2>
+      <div class="section-tag">format / textures</div>
+
+      <p>Textures are embedded directly in the <code>.ivm</code> file. No external references, no companion files. The format is fully self-contained.</p>
+
+      <h3>Encoding: QOI</h3>
+      <p>QOI (Quite OK Image) is the right choice for this use case. It is designed for pixel art and low-color content — exactly what PS1-style textures are. Fast decode (no zlib, just a state machine), decent compression, trivially simple spec.</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">max texture size</div>
+          <p style="font-size:24px; color:var(--teal); font-family:'VT323',monospace; line-height:1.2;">128 × 128</p>
+          <p style="font-size:13px; color:var(--text-dim); margin-top:0.5rem;">65KB raw RGBA. ~10–20KB QOI compressed. Twenty textures ≈ 300KB total.</p>
+        </div>
+        <div class="card">
+          <div class="card-title">qoi encode/decode</div>
+          <pre style="margin:0; font-size:11px;"><span class="cm">// encode</span>
+<span class="kw">let</span> enc <span class="op">=</span> qoi::encode_to_vec(
+    <span class="op">&</span>rgba, w, h)<span class="op">?</span>;
+<span class="cm">// decode</span>
+<span class="kw">let</span> (hdr, px) <span class="op">=</span> qoi::decode_to_vec(
+    <span class="op">&</span>bytes)<span class="op">?</span>;</pre>
+        </div>
+      </div>
+
+      <h3>Texture Section Layout</h3>
+      <pre><span class="cm">--- per texture ---</span>
+<span class="ty">u8</span>          name_len
+[<span class="ty">u8</span>; N]     name        <span class="cm">// length-prefixed, no null terminator</span>
+<span class="ty">u32</span>         data_len
+[<span class="ty">u8</span>; N]     qoi_data    <span class="cm">// RGBA QOI encoded pixels</span></pre>
+
+      <p>Face <code>texture_id</code> fields are indices into this table. The string table entry for each texture ID gives the human-readable name for editor display.</p>
+    </section>
+
+    <section id="entities">
+      <h2>Entities</h2>
+      <div class="section-tag">format / entities</div>
+
+      <p>Entities are non-geometry objects: spawn points, lights, triggers, enemies, props. They use a Quake-style key/value property system — flexible enough to describe anything without a rigid per-type schema.</p>
+
+      <pre><span class="kw">struct</span> <span class="ty">Entity</span> {
+    id:         <span class="ty">u32</span>,
+    position:   [<span class="ty">i32</span>; <span class="nu">3</span>],       <span class="cm">// ℤ³ position</span>
+    kind:       <span class="ty">EntityKind</span>,     <span class="cm">// Spawn, Light, Trigger, Enemy, Prop, ...</span>
+    properties: <span class="ty">HashMap</span>&lt;<span class="ty">String</span>, <span class="ty">String</span>&gt;,  <span class="cm">// quake-style kvs</span>
+}</pre>
+
+      <div class="callout yellow">
+        <div class="callout-label">quake kv system</div>
+        Key/value strings are flexible enough to describe any entity type without changing the format. New entity types can be added without a format version bump. Serialized in the binary as length-prefixed string pairs.
+      </div>
+
+      <p>What was previously encoded in the tile grid as <code>special_type</code>, <code>special_data</code>, <code>prop_type</code>, and <code>prop_variant</code> bytes all becomes entity KV pairs. Position replaces tile coordinates.</p>
+    </section>
+
+    <hr class="divider">
+
+    <section id="editor-design">
+      <h2>Editor Design Language</h2>
+      <div class="section-tag">editor / aesthetic</div>
+
+      <p>The editor does not look like Blender. There is no floating UI, no gizmo overlays, no toolbar. The editing tools manifest as physical objects in the same PS1-rendered world. The editor <em>is</em> the game world.</p>
+
+      <div class="callout purple">
+        <div class="callout-label">aesthetic reference</div>
+        Petscop. An ARG. Something that doesn't explain itself. The Windows XP pipe screensaver rendered through an NTSC filter. A tool that seems to have existed before you found it.
+      </div>
+
+      <h3>Vertex Spheres</h3>
+      <p>Each vertex is a low-poly sphere (octahedron or icosphere subdivision 1 — 8 faces, very PS1). Physical geometry, goes through the full render pipeline including vertex snap and NTSC filter.</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">unselected</div>
+          <p style="font-size:13px; color:var(--text-dim);">VIC-20 light red <code style="color:var(--vert-unselected)">#b66862</code> — dusty, not aggressive. Static. Radius ~0.12 world units.</p>
+        </div>
+        <div class="card">
+          <div class="card-title">selected</div>
+          <p style="font-size:13px; color:var(--text-dim);">Pulsates between VIC-20 light yellow <code style="color:var(--vert-selected)">#ffffb0</code> and white <code>#ffffff</code> via sine wave on <code>anim_elapsed_ms</code>. Vertex color updated on CPU each frame — no shader change.</p>
+        </div>
+      </div>
+
+      <pre><span class="cm">// VIC-20 #ffffb0 → #ffffff pulse</span>
+<span class="kw">fn</span> <span class="nm">selection_pulse_color</span>(anim_elapsed_ms: <span class="ty">f64</span>) <span class="op">-></span> [<span class="ty">u8</span>; <span class="nu">4</span>] {
+    <span class="kw">let</span> t <span class="op">=</span> ((anim_elapsed_ms <span class="op">*</span> <span class="nu">0.003</span>).sin() <span class="op">*</span> <span class="nu">0.5</span> <span class="op">+</span> <span class="nu">0.5</span>) <span class="kw">as</span> <span class="ty">f32</span>;
+    <span class="cm">// #ffffb0 = [255, 255, 176] — lerp to white [255, 255, 255]</span>
+    [<span class="nu">255</span>, <span class="nu">255</span>, (<span class="nu">176.0</span> <span class="op">+</span> t <span class="op">*</span> <span class="nu">79.0</span>) <span class="kw">as</span> <span class="ty">u8</span>, <span class="nu">255</span>]
+}</pre>
+
+      <h3>Edge Pipes</h3>
+      <p>Edges are rendered as cylinder primitives — the same cylinder primitive used for map geometry. Thin: radius ~0.05–0.08 world units (5–8cm), visually distinct from world geometry. Sphere joints at each vertex where edges meet, slightly larger than pipe radius (~0.12 units).</p>
+
+      <p>The pipe visuals wobble with camera movement due to vertex snap. This looks exactly right for the aesthetic.</p>
+
+      <h3>Object Colours</h3>
+      <p>Each map object has a persistent colour assigned from the VIC-20 palette based on its ID. The VIC-20 colours are almost-right in a deeply uncanny way — recognisable as real colours but slightly wrong in hue and value in a way modern palettes never are. Nothing is fully saturated, nothing is neutral; every colour is contaminated by another hue.</p>
+
+      <div class="obj-palette">
+        <div class="obj-swatch" style="background:var(--obj0); color:#4a1a5a;">OBJ 0</div>
+        <div class="obj-swatch" style="background:var(--obj1); color:#1a4a1a;">OBJ 1</div>
+        <div class="obj-swatch" style="background:var(--obj2); color:#1a4a4a;">OBJ 2</div>
+        <div class="obj-swatch" style="background:var(--obj3); color:#4a2a0a;">OBJ 3</div>
+        <div class="obj-swatch" style="background:var(--obj4); color:#1a1a4a;">OBJ 4</div>
+        <div class="obj-swatch" style="background:var(--obj5); color:#4a4a0a;">OBJ 5</div>
+        <div class="obj-swatch" style="background:var(--obj6); color:#0a2a2a;">OBJ 6</div>
+        <div class="obj-swatch" style="background:var(--obj7); color:#ffffff;">OBJ 7</div>
+      </div>
+
+      <pre><span class="cm">// VIC-20 sourced — colours that are almost right, in a wrong way</span>
+<span class="kw">fn</span> <span class="nm">object_color</span>(id: <span class="ty">u32</span>) <span class="op">-></span> [<span class="ty">u8</span>; <span class="nu">4</span>] {
+    <span class="kw">const</span> <span class="nm">PALETTE</span>: [[<span class="ty">u8</span>; <span class="nu">4</span>]; <span class="nu">8</span>] <span class="op">=</span> [
+        [<span class="nu">0xe9</span>, <span class="nu">0x9d</span>, <span class="nu">0xf5</span>, <span class="nu">255</span>],  <span class="cm">// #e99df5 — wrong lilac</span>
+        [<span class="nu">0x92</span>, <span class="nu">0xdf</span>, <span class="nu">0x87</span>, <span class="nu">255</span>],  <span class="cm">// #92df87 — phosphor green</span>
+        [<span class="nu">0xc5</span>, <span class="nu">0xff</span>, <span class="nu">0xff</span>, <span class="nu">255</span>],  <span class="cm">// #c5ffff — blown-out cyan</span>
+        [<span class="nu">0xe9</span>, <span class="nu">0xb2</span>, <span class="nu">0x87</span>, <span class="nu">255</span>],  <span class="cm">// #e9b287 — warm terracotta</span>
+        [<span class="nu">0x7e</span>, <span class="nu">0x70</span>, <span class="nu">0xca</span>, <span class="nu">255</span>],  <span class="cm">// #7e70ca — washed purple</span>
+        [<span class="nu">0xff</span>, <span class="nu">0xff</span>, <span class="nu">0xb0</span>, <span class="nu">255</span>],  <span class="cm">// #ffffb0 — pale wrong yellow</span>
+        [<span class="nu">0x85</span>, <span class="nu">0xd4</span>, <span class="nu">0xdc</span>, <span class="nu">255</span>],  <span class="cm">// #85d4dc — muted teal</span>
+        [<span class="nu">0xa8</span>, <span class="nu">0x73</span>, <span class="nu">0x4a</span>, <span class="nu">255</span>],  <span class="cm">// #a8734a — dark brown, earthy</span>
+    ];
+    <span class="nm">PALETTE</span>[(id <span class="kw">as</span> <span class="ty">usize</span>) <span class="op">%</span> <span class="nm">PALETTE</span>.len()]
+}</pre>
+
+      <h3>UI Text</h3>
+      <p>All editor UI uses the existing <code>TextLayer</code> system — a terminal-style character cell grid rendered to a CPU pixel buffer and composited over the scene. No new UI framework, no floating panels.</p>
+
+      <p>Text is terse and slightly cryptic. Mode changes print to a scrolling log rather than updating a status line. The editor introduces itself the first time you enter it.</p>
+
+      <pre style="color:var(--green)">OBJECT 003 SELECTED
+VERTICES: 12  FACES: 8
+PLANE LOCKED [X=004]
+
+> _</pre>
+    </section>
+
+    <section id="vic20-palette">
+      <h2>VIC-20 Palette</h2>
+      <div class="section-tag">editor / colour system</div>
+
+      <p>The full 16-colour VIC-20 palette is the colour system for the editor. It has a specific quality: every colour is almost right in a way that feels uncanny. Nothing is fully saturated, nothing is neutral, every colour is contaminated by another hue. Through the NTSC filter, the already-wrong colours bleed chroma sideways and become stranger still.</p>
+
+      <div style="display:grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 1.5rem 0;">
+        <div style="aspect-ratio:1; background:#000000; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#555; line-height:1;">000000</span></div>
+        <div style="aspect-ratio:1; background:#ffffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#aaa; line-height:1;">ffffff</span></div>
+        <div style="aspect-ratio:1; background:#a8734a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#3a2010; line-height:1;">a8734a</span></div>
+        <div style="aspect-ratio:1; background:#e9b287; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#5a3010; line-height:1;">e9b287</span></div>
+        <div style="aspect-ratio:1; background:#772d26; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#2a0a08; line-height:1;">772d26</span></div>
+        <div style="aspect-ratio:1; background:#b66862; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#3a1010; line-height:1;">b66862</span></div>
+        <div style="aspect-ratio:1; background:#85d4dc; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#103a3a; line-height:1;">85d4dc</span></div>
+        <div style="aspect-ratio:1; background:#c5ffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#105050; line-height:1;">c5ffff</span></div>
+        <div style="aspect-ratio:1; background:#a85fb4; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#2a0a30; line-height:1;">a85fb4</span></div>
+        <div style="aspect-ratio:1; background:#e99df5; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#401050; line-height:1;">e99df5</span></div>
+        <div style="aspect-ratio:1; background:#559e4a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#102810; line-height:1;">559e4a</span></div>
+        <div style="aspect-ratio:1; background:#92df87; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#103010; line-height:1;">92df87</span></div>
+        <div style="aspect-ratio:1; background:#42348b; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#100a2a; line-height:1;">42348b</span></div>
+        <div style="aspect-ratio:1; background:#7e70ca; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#1a1040; line-height:1;">7e70ca</span></div>
+        <div style="aspect-ratio:1; background:#bdcc71; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#303810; line-height:1;">bdcc71</span></div>
+        <div style="aspect-ratio:1; background:#ffffb0; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#404010; line-height:1;">ffffb0</span></div>
+      </div>
+
+      <table class="format-table">
+        <tr><th>role</th><th>colour</th><th>hex</th><th>notes</th></tr>
+        <tr><td>vertex unselected</td><td><span style="display:inline-block;width:12px;height:12px;background:#b66862;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#b66862</td><td class="note">lt-red — dusty marker</td></tr>
+        <tr><td>vertex selected</td><td><span style="display:inline-block;width:12px;height:12px;background:#ffffb0;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#ffffb0 → #ffffff</td><td class="note">lt-yellow pulsing to white</td></tr>
+        <tr><td>axis X plane</td><td><span style="display:inline-block;width:12px;height:12px;background:#b66862;border-radius:2px;vertical-align:middle;margin-right:6px"></span><span style="display:inline-block;width:12px;height:12px;background:#e9b287;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#b66862 / #e9b287</td><td class="note">lt-red fill / peach lines</td></tr>
+        <tr><td>axis Y plane</td><td><span style="display:inline-block;width:12px;height:12px;background:#bdcc71;border-radius:2px;vertical-align:middle;margin-right:6px"></span><span style="display:inline-block;width:12px;height:12px;background:#ffffb0;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#bdcc71 / #ffffb0</td><td class="note">yellow-green fill / lt-yellow lines</td></tr>
+        <tr><td>axis Z plane</td><td><span style="display:inline-block;width:12px;height:12px;background:#42348b;border-radius:2px;vertical-align:middle;margin-right:6px"></span><span style="display:inline-block;width:12px;height:12px;background:#7e70ca;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#42348b / #7e70ca</td><td class="note">dk-blue fill / lt-blue lines</td></tr>
+        <tr><td>ground grid</td><td><span style="display:inline-block;width:12px;height:12px;background:#559e4a;border-radius:2px;vertical-align:middle;margin-right:6px"></span><span style="display:inline-block;width:12px;height:12px;background:#92df87;border-radius:2px;vertical-align:middle;margin-right:6px"></span></td><td class="name">#559e4a / #92df87</td><td class="note">phosphor greens — always on</td></tr>
+      </table>
+    </section>
+
+
+      <h2>Interaction Model</h2>
+      <div class="section-tag">editor / interaction</div>
+
+      <p>Stolen from the best parts of three tools and combined:</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">from blender</div>
+          <p style="font-size:13px; color:var(--text-dim)">Axis locking: <code>shift+x/y/z</code> constrains movement to that axis. Scroll to move along it. Clean and fast.</p>
+        </div>
+        <div class="card">
+          <div class="card-title">from fusion 360</div>
+          <p style="font-size:13px; color:var(--text-dim)">Plane editing mode. A translucent plane appears on the selected axis touching the current working point. All clicks land on this plane.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:0.75rem;">
+        <div class="card-title">from illustrator / figma pen tool</div>
+        <p style="font-size:13px; color:var(--text-dim)">Click-and-place workflow. Clicking places a new vertex. Pen mode auto-chains. Separate edge tool for explicit A→B connections.</p>
+      </div>
+
+      <h3>Plane Mode</h3>
+      <p>Enter with <code>alt+x</code>, <code>alt+y</code>, or <code>alt+z</code>. A translucent plane appears on the chosen axis, touching the current working point. Shift-scroll moves the plane along its perpendicular axis. All clicks while in plane mode produce vertices on that plane — if working on an X plane, you are locked to that X coordinate and move freely in Y and Z.</p>
+
+      <div class="callout">
+        <div class="callout-label">snapping is implicit</div>
+        Since all coordinates are integers, every click in plane mode just rounds the plane intersection to the nearest integer. There is no snap toggle. It is always on. This is a consequence of ℤ³.
+      </div>
+
+      <h3>The Plane Ghost</h3>
+      <p>Not geometry — a fullscreen shader pass, like the sky pass. A ray is cast from the camera through each fragment and intersected with the plane equation. The plane extends to infinity, fading with distance via exponential fog. Grid lines fall at integer boundaries — the same boundaries where vertex snap quantizes — so the grid is literally showing you where vertices can exist.</p>
+
+      <p>The plane colour is determined by its axis, sourced from the VIC-20 palette. Switching axis with <code>alt+x/y/z</code> snaps the whole plane to the new colour.</p>
+
+      <table class="format-table" style="margin: 1rem 0;">
+        <tr><th>axis</th><th>fill</th><th>grid lines</th><th>vic-20 source</th></tr>
+        <tr>
+          <td style="color:var(--axis-x)">X</td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-x);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-x)">#b66862</code></td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-x-bright);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-x-bright)">#e9b287</code></td>
+          <td class="note">lt-red / peach</td>
+        </tr>
+        <tr>
+          <td style="color:var(--axis-y)">Y</td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-y);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-y)">#bdcc71</code></td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-y-bright);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-y-bright)">#ffffb0</code></td>
+          <td class="note">yellow-green / lt-yellow</td>
+        </tr>
+        <tr>
+          <td style="color:var(--axis-z-bright)">Z</td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-z);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-z-bright)">#42348b</code></td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-z-bright);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-z-bright)">#7e70ca</code></td>
+          <td class="note">dk-blue / lt-blue</td>
+        </tr>
+        <tr>
+          <td style="color:var(--axis-ground)">ground</td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--axis-ground);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--axis-ground)">#559e4a</code></td>
+          <td><span style="display:inline-block;width:14px;height:14px;background:var(--vic-lt-green);border-radius:2px;vertical-align:middle;margin-right:6px"></span><code style="color:var(--vic-lt-green)">#92df87</code></td>
+          <td class="note">dk-green / lt-green — always visible</td>
+        </tr>
+      </table>
+
+      <p>The ground grid at y=0 is always active in edit mode regardless of plane lock state. It is fainter than the active plane, giving a permanent spatial anchor — the endless grid floor is a staple of the liminal aesthetic. When the active plane is Y at y=0, the two overlap; they blend additively so the intersection reads brighter, like two signals interfering.</p>
+
+      <pre><span class="cm">// plane pass uniforms</span>
+<span class="kw">struct</span> <span class="ty">PlaneUniforms</span> {
+    inv_view_proj: <span class="ty">mat4x4</span>&lt;<span class="ty">f32</span>&gt;,
+    camera_pos:    <span class="ty">vec4</span>&lt;<span class="ty">f32</span>&gt;,
+    plane_color:   <span class="ty">vec4</span>&lt;<span class="ty">f32</span>&gt;,   <span class="cm">// rgb from VIC-20 axis colour</span>
+    plane_value:   <span class="ty">f32</span>,          <span class="cm">// world coordinate of the plane</span>
+    plane_axis:    <span class="ty">u32</span>,          <span class="cm">// 0=X  1=Y  2=Z</span>
+    fill_alpha:    <span class="ty">f32</span>,          <span class="cm">// ~0.06</span>
+    line_alpha:    <span class="ty">f32</span>,          <span class="cm">// ~0.70</span>
+}
+
+<span class="cm">// fragment — ray/plane intersection + integer grid</span>
+<span class="kw">let</span> t  <span class="op">=</span> (uniforms.plane_value <span class="op">-</span> ray_origin[axis]) <span class="op">/</span> ray_dir[axis];
+<span class="kw">let</span> hit <span class="op">=</span> ray_origin <span class="op">+</span> ray_dir <span class="op">*</span> t;
+<span class="kw">let</span> grid  <span class="op">=</span> <span class="nm">grid_lines</span>(hit, plane_axis);   <span class="cm">// fwidth AA at integer boundaries</span>
+<span class="kw">let</span> alpha <span class="op">=</span> mix(uniforms.fill_alpha, uniforms.line_alpha, grid)
+           <span class="op">*</span> exp(<span class="op">-</span>t <span class="op">*</span> fog_density);        <span class="cm">// distance fade to infinity</span>
+<span class="kw">return</span> <span class="ty">vec4</span>(uniforms.plane_color.rgb, alpha);</pre>
+
+      <h3>Selection</h3>
+      <p>Vertices are red (unselected) or yellow-white pulsing (selected). Multi-select via shift-click. Lasso tool: since all vertices project to screen space for rendering, lasso is a 2D point-in-polygon test against projected positions — very cheap. Lasso outline drawn into the overlay pixel buffer.</p>
+
+      <h3>Object Focus Mode</h3>
+      <p>Press to enter focus on a single object. All raycasts and selections are filtered to that object only. All plane lock and axis lock controls still function. Escape exits. The TextLayer displays the focused object ID and name.</p>
+    </section>
+
+    <section id="view-modes">
+      <h2>View Modes</h2>
+      <div class="section-tag">editor / view modes</div>
+
+      <p>Four view modes, switchable at any time. All go through the same wgpu pipeline — the only difference is what values are put into <code>SceneVertex.color</code> and whether face geometry is included in the vertex buffer.</p>
+
+      <div class="view-modes">
+        <div class="view-mode-card">
+          <div class="view-mode-name">wireframe</div>
+          <div class="view-mode-desc">Only pipe cylinders and vertex spheres. No face geometry emitted. Map faces omitted from draw call entirely.</div>
+        </div>
+        <div class="view-mode-card">
+          <div class="view-mode-name">object colours</div>
+          <div class="view-mode-desc">Faces rendered flat using <code>object_color(id)</code> baked into vertex colors. A 1×1 white atlas pixel drives everything through vertex color. No UV lookup needed.</div>
+        </div>
+        <div class="view-mode-card">
+          <div class="view-mode-name">textured</div>
+          <div class="view-mode-desc">Faces with atlas UVs. Vertex color neutral white <code>[255,255,255,255]</code>. Same as gameplay render mode.</div>
+        </div>
+        <div class="view-mode-card">
+          <div class="view-mode-name">shaded</div>
+          <div class="view-mode-desc">UVs plus vertex color carrying baked shadow/light data. The final look. Phong shading may be added later as an optional pass.</div>
+        </div>
+      </div>
+
+      <pre><span class="kw">enum</span> <span class="ty">ViewMode</span> {
+    <span class="ty">Wireframe</span>,
+    <span class="ty">ObjectColors</span>,
+    <span class="ty">Textured</span>,
+    <span class="ty">Shaded</span>,
+}
+<span class="cm">// build_editor_mesh branches on ViewMode when emitting SceneVertex data</span>
+<span class="cm">// rebuild on mode change — at PS1-scale geometry this is instant</span></pre>
+
+      <div class="callout yellow">
+        <div class="callout-label">ntsc on everything</div>
+        All four view modes go through the NTSC encode/decode passes. The oversaturated flat colours of object-colour mode bleeding chroma into each other through the filter is the LSD Dream Emulator look.
+      </div>
+    </section>
+
+    <section id="state-machine">
+      <h2>Editor State Machine</h2>
+      <div class="section-tag">editor / states</div>
+
+      <div class="state-machine">
+        <div class="state">
+          <div class="state-name">IDLE</div>
+          <ul class="state-transitions">
+            <li><span class="trigger">shift+click vertex</span> → <span class="result">vertex added to selection</span></li>
+            <li><span class="trigger">click empty space</span> → <span class="result">lasso start OR deselect all</span></li>
+            <li><span class="trigger">click empty + pen mode</span> → <span class="result">place new vertex on current plane</span></li>
+            <li><span class="trigger">alt+x/y/z</span> → <span class="result">enter PLANE_MODE (axis set)</span></li>
+            <li><span class="trigger">click object</span> → <span class="result">VERTEX_SELECTED</span></li>
+          </ul>
+        </div>
+        <div class="state">
+          <div class="state-name">PLANE_MODE (axis locked)</div>
+          <ul class="state-transitions">
+            <li><span class="trigger">click</span> → <span class="result">new vertex at plane intersection, rounded to ℤ³</span></li>
+            <li><span class="trigger">shift+scroll</span> → <span class="result">translate plane along its normal</span></li>
+            <li><span class="trigger">click existing vertex</span> → <span class="result">select / start edge</span></li>
+            <li><span class="trigger">alt+x/y/z</span> → <span class="result">change plane axis</span></li>
+            <li><span class="trigger">escape</span> → <span class="result">exit to IDLE</span></li>
+          </ul>
+        </div>
+        <div class="state">
+          <div class="state-name">VERTEX_SELECTED</div>
+          <ul class="state-transitions">
+            <li><span class="trigger">shift+x/y/z + scroll</span> → <span class="result">translate along axis</span></li>
+            <li><span class="trigger">delete</span> → <span class="result">remove vertex, update faces</span></li>
+            <li><span class="trigger">click another vertex</span> → <span class="result">draw edge; merge objects if cross-boundary</span></li>
+            <li><span class="trigger">shadow tool</span> → <span class="result">open vertex color painter</span></li>
+            <li><span class="trigger">escape</span> → <span class="result">deselect, return to IDLE</span></li>
+          </ul>
+        </div>
+        <div class="state">
+          <div class="state-name">OBJECT_FOCUS (wraps above)</div>
+          <ul class="state-transitions">
+            <li><span class="trigger">all above states active</span> → <span class="result">raycasts only hit focused object</span></li>
+            <li><span class="trigger">plane lock / axis lock</span> → <span class="result">function normally</span></li>
+            <li><span class="trigger">escape</span> → <span class="result">exit focus, return to IDLE</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <section id="pipeline">
+      <h2>Render Pipeline</h2>
+      <div class="section-tag">renderer / pipeline</div>
+
+      <p>The pipeline gains one new pass for editor geometry. Everything else is unchanged. Editor geometry runs through the NTSC filter — pipes, spheres, and the plane ghost all exist in the same corrupted-CRT world as the map geometry.</p>
+
+      <div class="render-pipeline">
+        <div class="pipeline-pass">
+          <div class="pass-num">1</div>
+          <div class="pass-name">sky pass</div>
+          <div class="pass-desc">Procedural sky. Needs camera forward Y component once pitch is unlocked.</div>
+          <div class="pass-tag tag-modified">modified</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">2</div>
+          <div class="pass-name">scene pass</div>
+          <div class="pass-desc">Map geometry. Wall + floor vertex buffers rebuilt from <code>MapMesh</code> rather than tile grid.</div>
+          <div class="pass-tag tag-modified">modified</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">3</div>
+          <div class="pass-name">editor pass</div>
+          <div class="pass-desc">Pipe cylinders, vertex spheres, plane ghost. Same pipeline. Alpha blend, depth test on. Only active in edit mode.</div>
+          <div class="pass-tag tag-new">new</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">4</div>
+          <div class="pass-name">overlay pass</div>
+          <div class="pass-desc">TextLayer CPU pixel buffer. Editor mode indicators, coordinate readouts, scrolling log.</div>
+          <div class="pass-tag tag-existing">existing</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">5</div>
+          <div class="pass-name">ntsc encode</div>
+          <div class="pass-desc">Chroma encode. All geometry — game and editor — goes through this.</div>
+          <div class="pass-tag tag-existing">existing</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">6</div>
+          <div class="pass-name">ntsc decode</div>
+          <div class="pass-desc">FIR decode + gamma. Output to decoded_view.</div>
+          <div class="pass-tag tag-existing">existing</div>
+        </div>
+        <div class="pipeline-pass">
+          <div class="pass-num">7</div>
+          <div class="pass-name">blit pass</div>
+          <div class="pass-desc">Aspect-preserving blit to surface. Viewport letterboxing.</div>
+          <div class="pass-tag tag-existing">existing</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="vertex">
+      <h2>Vertex Format</h2>
+      <div class="section-tag">renderer / vertex</div>
+
+      <p>Adding a <code>color</code> field to <code>SceneVertex</code> for vertex shading. <span class="inline-tag tag-rust">rust</span></p>
+
+      <pre><span class="kw">#[repr(C)]</span>
+<span class="kw">#[derive(Clone, Copy, Pod, Zeroable)]</span>
+<span class="kw">pub struct</span> <span class="ty">SceneVertex</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) position: [<span class="ty">f32</span>; <span class="nu">3</span>],   <span class="cm">// 12 bytes</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) uv:       [<span class="ty">f32</span>; <span class="nu">2</span>],   <span class="cm">//  8 bytes</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) color:    [<span class="ty">u8</span>;  <span class="nu">4</span>],   <span class="cm">//  4 bytes — Unorm8x4</span>
+}                                     <span class="cm">// 24 bytes total, naturally aligned</span>
+
+<span class="kw">impl</span> <span class="ty">SceneVertex</span> {
+    <span class="kw">pub const</span> <span class="nm">ATTRIBUTES</span>: [<span class="ty">wgpu::VertexAttribute</span>; <span class="nu">3</span>] <span class="op">=</span>
+        wgpu::vertex_attr_array![
+            <span class="nu">0</span> <span class="op">=></span> <span class="ty">Float32x3</span>,
+            <span class="nu">1</span> <span class="op">=></span> <span class="ty">Float32x2</span>,
+            <span class="nu">2</span> <span class="op">=></span> <span class="ty">Unorm8x4</span>,   <span class="cm">// auto-normalized to [0,1] in shader</span>
+        ];
+}</pre>
+
+      <p><code>Unorm8x4</code> means wgpu normalizes the bytes to <code>vec4&lt;f32&gt;</code> in <code>[0.0, 1.0]</code> automatically. Default white <code>[255, 255, 255, 255]</code> = no visible change to existing geometry. 24 bytes total, naturally aligned, <code>bytemuck::Pod</code> is satisfied.</p>
+
+      <div class="callout">
+        <div class="callout-label">gouraud shading for free</div>
+        Vertex color is interpolated linearly across each triangle by the rasterizer. This is Gouraud shading — exactly how the PS1 did it. Affine interpolation of vertex colors (no perspective correction) is what you get here for free, since it is just a plain vec4 interpolant. Authentically PS1 without extra work.
+      </div>
+    </section>
+
+    <section id="shader">
+      <h2>Shader Changes</h2>
+      <div class="section-tag">renderer / wgsl</div>
+
+      <p>Minimal changes to the existing vertex/fragment shader. <span class="inline-tag tag-wgsl">wgsl</span></p>
+
+      <pre><span class="cm">// vertex input — add color</span>
+<span class="kw">struct</span> <span class="ty">VertexIn</span> {
+    <span class="kw">@location</span>(<span class="nu">0</span>) position: <span class="ty">vec3</span>&lt;<span class="ty">f32</span>&gt;,
+    <span class="kw">@location</span>(<span class="nu">1</span>) uv:       <span class="ty">vec2</span>&lt;<span class="ty">f32</span>&gt;,
+    <span class="kw">@location</span>(<span class="nu">2</span>) color:    <span class="ty">vec4</span>&lt;<span class="ty">f32</span>&gt;,  <span class="cm">// Unorm8x4 arrives normalized</span>
+};
+
+<span class="cm">// vertex output — pass through</span>
+<span class="kw">struct</span> <span class="ty">VertexOut</span> {
+    <span class="kw">@builtin</span>(position) position: <span class="ty">vec4</span>&lt;<span class="ty">f32</span>&gt;,
+    <span class="kw">@location</span>(<span class="nu">0</span>) uv:          <span class="ty">vec2</span>&lt;<span class="ty">f32</span>&gt;,
+    <span class="kw">@location</span>(<span class="nu">1</span>) affine_uv:   <span class="ty">vec3</span>&lt;<span class="ty">f32</span>&gt;,
+    <span class="kw">@location</span>(<span class="nu">2</span>) color:       <span class="ty">vec4</span>&lt;<span class="ty">f32</span>&gt;,  <span class="cm">// added</span>
+};
+
+<span class="cm">// vs_main — add one line</span>
+<span class="kw">out</span>.color <span class="op">=</span> input.color;
+
+<span class="cm">// fs_main — multiply texture by vertex color</span>
+<span class="kw">let</span> color <span class="op">=</span> textureSample(t_atlas, s_atlas, uv) <span class="op">*</span> input.color;
+<span class="kw">if</span> (color.a <span class="op">&lt;</span> <span class="nu">0.05</span>) { <span class="kw">discard</span>; }
+<span class="kw">return</span> color;</pre>
+
+      <p>The affine warp trick (<code>affine_uv</code> carrying <code>uv * w</code> and <code>w</code>, mixed in fragment shader) is completely unaffected. Vertex color is interpolated separately and applied as a final multiply.</p>
+    </section>
+
+    <section id="data-model">
+      <h2>Runtime Data Model</h2>
+      <div class="section-tag">runtime / data</div>
+
+      <pre><span class="cm">// Logical layer — preserved at runtime for edit mode</span>
+<span class="kw">struct</span> <span class="ty">MapObject</span> {
+    id:             <span class="ty">u32</span>,
+    name:           <span class="ty">String</span>,
+    vertices:       <span class="ty">Vec</span>&lt;[<span class="ty">i32</span>; <span class="nu">3</span>]&gt;,
+    vertex_colors:  <span class="ty">Vec</span>&lt;[<span class="ty">u8</span>; <span class="nu">4</span>]&gt;,   <span class="cm">// parallel to vertices</span>
+    faces:          <span class="ty">Vec</span>&lt;<span class="ty">Face</span>&gt;,
+}
+
+<span class="kw">struct</span> <span class="ty">Map</span> {
+    objects:  <span class="ty">Vec</span>&lt;<span class="ty">MapObject</span>&gt;,
+    entities: <span class="ty">Vec</span>&lt;<span class="ty">Entity</span>&gt;,
+}
+
+<span class="cm">// Render layer — derived from Map, rebuilt when geometry changes</span>
+<span class="kw">struct</span> <span class="ty">MapMesh</span> {
+    vertices: <span class="ty">Vec</span>&lt;<span class="ty">SceneVertex</span>&gt;,
+    indices:  <span class="ty">Vec</span>&lt;<span class="ty">u32</span>&gt;,
+}
+<span class="cm">// MapMesh is a cache. Full rebuild is fine at PS1-scale geometry.</span>
+<span class="cm">// build_static_mesh() becomes build_map_mesh(map: &Map) -> MapMesh</span></pre>
+    </section>
+
+    <section id="edit-game">
+      <h2>Edit / Game Switch</h2>
+      <div class="section-tag">runtime / modes</div>
+
+      <p>The editor is part of the game binary, not a separate tool. Switching between edit and gameplay mode is seamless — both modes render through the same pipeline with the same camera and world state.</p>
+
+      <pre><span class="kw">enum</span> <span class="ty">AppMode</span> {
+    <span class="ty">Game</span>,
+    <span class="ty">Editor</span>(<span class="ty">EditorState</span>),
+}
+
+<span class="cm">// In App::render():</span>
+<span class="kw">match</span> self.mode {
+    <span class="ty">AppMode::Game</span> <span class="op">=></span> {
+        <span class="cm">// existing path: assemble scene from game state</span>
+        <span class="cm">// render_frame(..., editor: None)</span>
+    }
+    <span class="ty">AppMode::Editor</span>(ref ed) <span class="op">=></span> {
+        <span class="cm">// assemble scene from EditorState</span>
+        <span class="cm">// render_frame(..., editor: Some(ed))</span>
+    }
+}</pre>
+
+      <div class="callout">
+        <div class="callout-label">renderer is mode-agnostic</div>
+        The renderer does not know which mode the app is in. It draws what it is given. The <code>Map</code> object graph is always in memory — it cannot be thrown away since edit mode may be entered at any time. <code>MapMesh</code> is rebuilt when geometry changes; the renderer always uses the current <code>MapMesh</code>.
+      </div>
+
+      <p>When entering edit mode, the game pauses, mouse capture mode switches from <code>ConfinedWarp</code>/<code>Locked</code> to free cursor, and the <code>TextLayer</code> switches to editor chrome. The 3D camera and world position are preserved — you are looking at the same place you were playing from.</p>
+    </section>
+
+  </main>
+</div>
+
+<div class="footer">
+  <span>IVM — INTEGER VERTEX MAP — DESIGN DOCUMENT</span>
+  <span>STATUS: IN PROGRESS <span class="blink">_</span></span>
+</div>
+
+</body>
+</html>
