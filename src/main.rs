@@ -9,6 +9,7 @@ mod clock;
 mod font;
 mod input;
 mod level;
+mod map;
 mod model;
 mod net;
 mod render_assembly;

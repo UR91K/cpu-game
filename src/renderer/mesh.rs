@@ -170,30 +170,12 @@ pub fn build_sprite_vertices(
         let top_right = bottom_right + up;
 
         vertices.extend_from_slice(&[
-            SceneVertex {
-                position: bottom_left.to_array(),
-                uv: [uv_rect.u0, uv_rect.v1],
-            },
-            SceneVertex {
-                position: bottom_right.to_array(),
-                uv: [uv_rect.u1, uv_rect.v1],
-            },
-            SceneVertex {
-                position: top_right.to_array(),
-                uv: [uv_rect.u1, uv_rect.v0],
-            },
-            SceneVertex {
-                position: bottom_left.to_array(),
-                uv: [uv_rect.u0, uv_rect.v1],
-            },
-            SceneVertex {
-                position: top_right.to_array(),
-                uv: [uv_rect.u1, uv_rect.v0],
-            },
-            SceneVertex {
-                position: top_left.to_array(),
-                uv: [uv_rect.u0, uv_rect.v0],
-            },
+            SceneVertex { position: bottom_left.to_array(),  uv: [uv_rect.u0, uv_rect.v1], color: SceneVertex::WHITE },
+            SceneVertex { position: bottom_right.to_array(), uv: [uv_rect.u1, uv_rect.v1], color: SceneVertex::WHITE },
+            SceneVertex { position: top_right.to_array(),    uv: [uv_rect.u1, uv_rect.v0], color: SceneVertex::WHITE },
+            SceneVertex { position: bottom_left.to_array(),  uv: [uv_rect.u0, uv_rect.v1], color: SceneVertex::WHITE },
+            SceneVertex { position: top_right.to_array(),    uv: [uv_rect.u1, uv_rect.v0], color: SceneVertex::WHITE },
+            SceneVertex { position: top_left.to_array(),     uv: [uv_rect.u0, uv_rect.v0], color: SceneVertex::WHITE },
         ]);
     }
 
@@ -237,6 +219,7 @@ pub fn push_quad(
         SceneVertex {
             position: pos,
             uv: [u, v],
+            color: SceneVertex::WHITE,
         }
     };
 

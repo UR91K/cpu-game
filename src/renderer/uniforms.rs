@@ -6,13 +6,16 @@ pub const CHROMA_MOD_FREQ: f32 = 4.0 * std::f32::consts::PI / 15.0;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct SceneVertex {
-    pub(crate) position: [f32; 3],
-    pub(crate) uv: [f32; 2],
-}
+    pub(crate) position: [f32; 3],   // 12 bytes
+    pub(crate) uv: [f32; 2],         //  8 bytes
+    pub(crate) color: [u8; 4],       //  4 bytes — Unorm8x4, default [255,255,255,255]
+}                                     // 24 bytes total, naturally aligned
 
 impl SceneVertex {
-    pub const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+    pub const WHITE: [u8; 4] = [255, 255, 255, 255];
+
+    pub const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Unorm8x4];
 }
 
 #[repr(C)]
