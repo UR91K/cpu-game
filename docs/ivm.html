@@ -5,25 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IVM — Integer Vertex Map / Design Document</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,700;1,400&display=swap');
 
   :root {
-    --bg: #0a0a12;
-    --bg2: #0f0f1a;
-    --bg3: #141425;
-    --border: #2a2a4a;
-    --border-bright: #4a4a8a;
-    --text: #c8c8e8;
-    --text-dim: #6868a0;
-    --text-bright: #e8e8ff;
-    --pink: #ff3c96;
-    --green: #3cff78;
-    --teal: #3cffe0;
-    --yellow: #ffdc3c;
-    --purple: #c83cff;
-    --orange: #ff783c;
-    --blue: #3c96ff;
-    --red: #ff3c3c;
+    --bg: #2a2a2a;
+    --bg2: #333333;
+    --bg3: #222222;
+    --border: #4a4a4a;
+    --border-bright: #6a6a6a;
+    --text: #d0d0d0;
+    --text-dim: #888888;
+    --text-bright: #f0f0f0;
+    --pink: #e99df5;
+    --green: #92df87;
+    --teal: #85d4dc;
+    --yellow: #bdcc71;
+    --purple: #a85fb4;
+    --orange: #e9b287;
+    --blue: #7e70ca;
+    --red: #b66862;
 
     /* VIC-20 palette */
     --vic-black:      #000000;
@@ -72,24 +72,10 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Courier Prime', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 15px;
     line-height: 1.7;
     padding: 0;
-  }
-
-  .scanlines {
-    position: fixed;
-    inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.08) 2px,
-      rgba(0,0,0,0.08) 4px
-    );
-    pointer-events: none;
-    z-index: 1000;
   }
 
   .header {
@@ -104,12 +90,12 @@
     position: absolute;
     inset: 0;
     background:
-      repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(60,255,224,0.015) 40px, rgba(60,255,224,0.015) 41px),
-      repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(60,255,224,0.015) 40px, rgba(60,255,224,0.015) 41px);
+      repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(133,212,220,0.015) 40px, rgba(133,212,220,0.015) 41px),
+      repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(133,212,220,0.015) 40px, rgba(133,212,220,0.015) 41px);
   }
 
   .header-tag {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     color: var(--teal);
     letter-spacing: 0.2em;
@@ -118,7 +104,7 @@
   }
 
   h1 {
-    font-family: 'VT323', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 72px;
     color: var(--text-bright);
     line-height: 1;
@@ -127,7 +113,7 @@
   }
 
   .header-sub {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
     color: var(--text-dim);
     letter-spacing: 0.1em;
@@ -143,7 +129,7 @@
     margin-top: 1.5rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--border);
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     color: var(--text-dim);
     flex-wrap: wrap;
@@ -171,7 +157,7 @@
   }
 
   .sidebar-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     color: var(--text-dim);
     letter-spacing: 0.2em;
@@ -182,7 +168,7 @@
   .nav-item {
     display: block;
     padding: 0.4rem 1.5rem;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     color: var(--text-dim);
     text-decoration: none;
@@ -191,7 +177,7 @@
     transition: all 0.1s;
   }
 
-  .nav-item:hover { color: var(--teal); border-left-color: var(--teal); background: rgba(60,255,224,0.04); }
+  .nav-item:hover { color: var(--teal); border-left-color: var(--teal); background: rgba(133,212,220,0.04); }
   .nav-item.active { color: var(--teal); border-left-color: var(--teal); }
 
   .nav-section { margin-bottom: 1.5rem; }
@@ -204,7 +190,7 @@
   section { margin-bottom: 4rem; }
 
   h2 {
-    font-family: 'VT323', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 42px;
     color: var(--text-bright);
     margin-bottom: 0.25rem;
@@ -212,7 +198,7 @@
   }
 
   .section-tag {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     color: var(--text-dim);
     letter-spacing: 0.2em;
@@ -230,7 +216,7 @@
   }
 
   h3 {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
     color: var(--yellow);
     letter-spacing: 0.1em;
@@ -254,7 +240,7 @@
   .callout.purple { border-left-color: var(--purple); background: rgba(200,60,255,0.04); }
 
   .callout-label {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     color: var(--teal);
     letter-spacing: 0.2em;
@@ -266,7 +252,7 @@
   .callout.purple .callout-label { color: var(--purple); }
 
   pre, code {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
   }
 
@@ -319,7 +305,7 @@
   }
 
   .card-title {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     color: var(--text-dim);
     letter-spacing: 0.15em;
@@ -330,7 +316,7 @@
   .format-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     margin: 1rem 0;
   }
@@ -370,7 +356,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 9px;
     color: rgba(0,0,0,0.7);
     font-weight: bold;
@@ -392,7 +378,7 @@
   }
 
   .state-name {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     color: var(--yellow);
     letter-spacing: 0.1em;
@@ -405,7 +391,7 @@
   }
 
   .state-transitions li {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     color: var(--text-dim);
     padding: 0.15rem 0;
@@ -441,7 +427,7 @@
   }
 
   .pass-num {
-    font-family: 'VT323', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 28px;
     color: var(--border-bright);
     min-width: 24px;
@@ -449,7 +435,7 @@
   }
 
   .pass-name {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 12px;
     color: var(--text-bright);
     letter-spacing: 0.05em;
@@ -463,16 +449,16 @@
 
   .pass-tag {
     margin-left: auto;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     padding: 2px 8px;
     border-radius: 3px;
     letter-spacing: 0.1em;
   }
 
-  .tag-existing { background: rgba(60,255,224,0.1); color: var(--teal); border: 1px solid rgba(60,255,224,0.3); }
-  .tag-new { background: rgba(255,60,150,0.1); color: var(--pink); border: 1px solid rgba(255,60,150,0.3); }
-  .tag-modified { background: rgba(255,220,60,0.1); color: var(--yellow); border: 1px solid rgba(255,220,60,0.3); }
+  .tag-existing { background: rgba(133,212,220,0.1); color: var(--teal); border: 1px solid rgba(133,212,220,0.3); }
+  .tag-new { background: rgba(233,157,245,0.1); color: var(--pink); border: 1px solid rgba(233,157,245,0.3); }
+  .tag-modified { background: rgba(189,204,113,0.1); color: var(--yellow); border: 1px solid rgba(189,204,113,0.3); }
 
   .view-modes {
     display: grid;
@@ -489,7 +475,7 @@
   }
 
   .view-mode-name {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     letter-spacing: 0.15em;
     text-transform: uppercase;
@@ -514,7 +500,7 @@
   }
 
   .inline-tag {
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     padding: 1px 6px;
     border-radius: 3px;
@@ -522,9 +508,9 @@
     vertical-align: middle;
   }
 
-  .tag-rust { background: rgba(255,120,60,0.15); color: var(--orange); border: 1px solid rgba(255,120,60,0.3); }
-  .tag-wgsl { background: rgba(60,150,255,0.15); color: var(--blue); border: 1px solid rgba(60,150,255,0.3); }
-  .tag-format { background: rgba(200,60,255,0.15); color: var(--purple); border: 1px solid rgba(200,60,255,0.3); }
+  .tag-rust { background: rgba(233,178,135,0.15); color: var(--orange); border: 1px solid rgba(233,178,135,0.3); }
+  .tag-wgsl { background: rgba(126,112,202,0.15); color: var(--blue); border: 1px solid rgba(126,112,202,0.3); }
+  .tag-format { background: rgba(168,95,180,0.15); color: var(--purple); border: 1px solid rgba(168,95,180,0.3); }
 
   .footer {
     border-top: 1px solid var(--border);
@@ -532,7 +518,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-family: 'Share Tech Mono', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
     color: var(--text-dim);
   }
@@ -558,8 +544,6 @@
 </style>
 </head>
 <body>
-<div class="scanlines"></div>
-
 <div class="header">
   <div class="header-tag">design document / v0.1 / in progress</div>
   <h1>IVM</h1>
@@ -831,7 +815,7 @@
       <div class="grid-2">
         <div class="card">
           <div class="card-title">max texture size</div>
-          <p style="font-size:24px; color:var(--teal); font-family:'VT323',monospace; line-height:1.2;">128 × 128</p>
+          <p style="font-size:24px; color:var(--teal); font-family:'IBM Plex Mono',monospace; line-height:1.2;">128 × 128</p>
           <p style="font-size:13px; color:var(--text-dim); margin-top:0.5rem;">65KB raw RGBA. ~10–20KB QOI compressed. Twenty textures ≈ 300KB total.</p>
         </div>
         <div class="card">
@@ -963,22 +947,22 @@ PLANE LOCKED [X=004]
       <p>The full 16-colour VIC-20 palette is the colour system for the editor. It has a specific quality: every colour is almost right in a way that feels uncanny. Nothing is fully saturated, nothing is neutral, every colour is contaminated by another hue. Through the NTSC filter, the already-wrong colours bleed chroma sideways and become stranger still.</p>
 
       <div style="display:grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 1.5rem 0;">
-        <div style="aspect-ratio:1; background:#000000; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#555; line-height:1;">000000</span></div>
-        <div style="aspect-ratio:1; background:#ffffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#aaa; line-height:1;">ffffff</span></div>
-        <div style="aspect-ratio:1; background:#a8734a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#3a2010; line-height:1;">a8734a</span></div>
-        <div style="aspect-ratio:1; background:#e9b287; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#5a3010; line-height:1;">e9b287</span></div>
-        <div style="aspect-ratio:1; background:#772d26; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#2a0a08; line-height:1;">772d26</span></div>
-        <div style="aspect-ratio:1; background:#b66862; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#3a1010; line-height:1;">b66862</span></div>
-        <div style="aspect-ratio:1; background:#85d4dc; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#103a3a; line-height:1;">85d4dc</span></div>
-        <div style="aspect-ratio:1; background:#c5ffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#105050; line-height:1;">c5ffff</span></div>
-        <div style="aspect-ratio:1; background:#a85fb4; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#2a0a30; line-height:1;">a85fb4</span></div>
-        <div style="aspect-ratio:1; background:#e99df5; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#401050; line-height:1;">e99df5</span></div>
-        <div style="aspect-ratio:1; background:#559e4a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#102810; line-height:1;">559e4a</span></div>
-        <div style="aspect-ratio:1; background:#92df87; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#103010; line-height:1;">92df87</span></div>
-        <div style="aspect-ratio:1; background:#42348b; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#100a2a; line-height:1;">42348b</span></div>
-        <div style="aspect-ratio:1; background:#7e70ca; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#1a1040; line-height:1;">7e70ca</span></div>
-        <div style="aspect-ratio:1; background:#bdcc71; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#303810; line-height:1;">bdcc71</span></div>
-        <div style="aspect-ratio:1; background:#ffffb0; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'Share Tech Mono',monospace; font-size:9px; color:#404010; line-height:1;">ffffb0</span></div>
+        <div style="aspect-ratio:1; background:#000000; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#555; line-height:1;">000000</span></div>
+        <div style="aspect-ratio:1; background:#ffffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#aaa; line-height:1;">ffffff</span></div>
+        <div style="aspect-ratio:1; background:#a8734a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#3a2010; line-height:1;">a8734a</span></div>
+        <div style="aspect-ratio:1; background:#e9b287; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#5a3010; line-height:1;">e9b287</span></div>
+        <div style="aspect-ratio:1; background:#772d26; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#2a0a08; line-height:1;">772d26</span></div>
+        <div style="aspect-ratio:1; background:#b66862; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#3a1010; line-height:1;">b66862</span></div>
+        <div style="aspect-ratio:1; background:#85d4dc; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#103a3a; line-height:1;">85d4dc</span></div>
+        <div style="aspect-ratio:1; background:#c5ffff; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#105050; line-height:1;">c5ffff</span></div>
+        <div style="aspect-ratio:1; background:#a85fb4; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#2a0a30; line-height:1;">a85fb4</span></div>
+        <div style="aspect-ratio:1; background:#e99df5; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#401050; line-height:1;">e99df5</span></div>
+        <div style="aspect-ratio:1; background:#559e4a; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#102810; line-height:1;">559e4a</span></div>
+        <div style="aspect-ratio:1; background:#92df87; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#103010; line-height:1;">92df87</span></div>
+        <div style="aspect-ratio:1; background:#42348b; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#100a2a; line-height:1;">42348b</span></div>
+        <div style="aspect-ratio:1; background:#7e70ca; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#1a1040; line-height:1;">7e70ca</span></div>
+        <div style="aspect-ratio:1; background:#bdcc71; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#303810; line-height:1;">bdcc71</span></div>
+        <div style="aspect-ratio:1; background:#ffffb0; border:1px solid var(--border); border-radius:3px; display:flex; align-items:flex-end; padding:4px;"><span style="font-family:'IBM Plex Mono',monospace; font-size:9px; color:#404010; line-height:1;">ffffb0</span></div>
       </div>
 
       <table class="format-table">
