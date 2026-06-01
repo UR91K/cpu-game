@@ -58,15 +58,10 @@ pub fn build_test_map(atlas_rect: AtlasRect) -> MapMesh {
     // Box B: 4w × 3h × 4d at (6, 0, -6) 
     emit_box(&mut verts, &mut idxs, &mut tris, rect,  6.0, 0.0, -6.0, 4.0, 3.0, 4.0);
 
-    // Ramp: rises y=0→3 from z=4→10, 5 units wide 
-    // Top surface
+    // Ramp: rises y=0→3 from z=4→10, 5 units wide
     emit_quad(&mut verts, &mut idxs, &mut tris, rect,
         [-2.5, 0.0,  4.0], [ 2.5, 0.0,  4.0],
         [ 2.5, 3.0, 10.0], [-2.5, 3.0, 10.0]);
-    // Underside
-    emit_quad(&mut verts, &mut idxs, &mut tris, rect,
-        [-2.5, 3.0, 10.0], [ 2.5, 3.0, 10.0],
-        [ 2.5, 0.0,  4.0], [-2.5, 0.0,  4.0]);
     // Side triangles
     emit_tri(&mut verts, &mut idxs, &mut tris, rect,
         [-2.5, 0.0, 4.0], [-2.5, 3.0, 10.0], [-2.5, 0.0, 10.0]);

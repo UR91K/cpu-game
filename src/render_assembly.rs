@@ -18,6 +18,8 @@ pub struct RenderCamera {
     pub dir_y: f64,
     pub plane_x: f64,
     pub plane_y: f64,
+    /// Vertical look angle in radians. Positive = look up, negative = look down.
+    pub pitch: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +39,7 @@ pub fn assemble_scene(
     state: &GameState,
     viewer: ControllerId,
     fov_plane_len: f64,
+    camera_pitch: f64,
 ) -> Option<RenderScene> {
     let player = state.players.get(&viewer)?;
     let pawn = state.entities.get(&player.pawn_id)?;
@@ -51,6 +54,7 @@ pub fn assemble_scene(
         dir_y: player.dir_y,
         plane_x,
         plane_y,
+        pitch: camera_pitch,
     };
 
     let billboards = state

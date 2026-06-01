@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::model::Level;
+use crate::map::{MapMesh, MapTri, build_test_map};
 use crate::render_assembly::{RenderBillboard, RenderCamera};
 use crate::renderer::atlas::build_texture_atlas;
 use crate::renderer::mesh::{
-    AtlasRect, build_sprite_vertices, build_static_mesh, create_sprite_buffer,
+    AtlasRect, build_sprite_vertices, create_sprite_buffer,
 };
 use crate::renderer::uniforms::{
     SceneUniforms, SceneVertex, SkyUniforms, build_decode_uniforms, build_encode_uniforms,
 };
-use crate::texture::{TextureKey, TextureManager};
+use crate::texture::{FloorTexture, TextureKey, TextureManager};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
@@ -21,7 +21,7 @@ pub const SCENE_HEIGHT: u32 = 480;
 pub const NEAR_PLANE: f32 = 0.05;
 pub const FAR_PLANE: f32 = 128.0;
 pub const CAMERA_HEIGHT: f32 = 0.6;
-pub const AFFINE_BLEND: f32 = 0.4;
+pub const AFFINE_BLEND: f32 = 0.0;
 const SKY_PITCH_RADIANS: f32 = 0.15;
 
 const SCENE_SHADER_SOURCE: &str = include_str!("gpu_renderer_scene.wgsl");
@@ -51,10 +51,27 @@ fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: 
     let vfov = 2.0 * (plane_len / aspect).atan();
 
     let eye = Vec3::new(camera.x as f32, CAMERA_HEIGHT, camera.y as f32);
-    let forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
+    let yaw_forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
+    // Pitch: tilt the forward vector up/down around the camera's right axis.
+    let pitch = camera.pitch as f32;
+    let forward = Vec3::new(
+        yaw_forward.x * pitch.cos(),
+        pitch.sin(),
+        yaw_forward.z * pitch.cos(),
+    );
     let view = Mat4::look_to_lh(eye, forward, Vec3::Y);
     let projection = Mat4::perspective_lh(vfov, aspect, NEAR_PLANE, FAR_PLANE);
     projection * view
+}
+
+/// Returns the pitched camera forward vector (unit length) for use in sky/other uniforms.
+fn camera_forward_vec(camera: &RenderCamera) -> Vec3 {
+    let pitch = camera.pitch as f32;
+    Vec3::new(
+        camera.dir_x as f32 * pitch.cos(),
+        pitch.sin(),
+        camera.dir_y as f32 * pitch.cos(),
+    )
 }
 
 pub struct SceneRenderer {
@@ -91,13 +108,14 @@ pub struct SceneRenderer {
     sprite_vertex_count: u32,
     atlas_rects: Vec<AtlasRect>,
     atlas_index_by_texture: HashMap<TextureKey, usize>,
+    /// Collision triangles for the current map. Owned here so game/editor can borrow them.
+    pub map_tris: Vec<MapTri>,
 }
 
 impl SceneRenderer {
     pub fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        level: &Level,
         texture_manager: &TextureManager,
         surface_format: wgpu::TextureFormat,
         scene_width: u32,
@@ -730,7 +748,9 @@ impl SceneRenderer {
             cache: None,
         });
 
-        let (wall_vertices, wall_indices) = build_static_mesh(level, &atlas_rects, texture_manager);
+        let floor_rect_idx = texture_manager.texture_index(TextureKey::Floor(FloorTexture::Smooth));
+        let MapMesh { vertices: wall_vertices, indices: wall_indices, tris: map_tris } =
+            build_test_map(atlas_rects[floor_rect_idx]);
         let wall_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cpu_game_wall_vertices"),
             contents: bytemuck::cast_slice(&wall_vertices),
@@ -779,6 +799,7 @@ impl SceneRenderer {
             sprite_vertex_count: 0,
             atlas_rects,
             atlas_index_by_texture,
+            map_tris,
         }
     }
 
@@ -822,6 +843,7 @@ impl SceneRenderer {
                 ],
             }),
         );
+        let fwd = camera_forward_vec(camera);
         self.queue.write_buffer(
             &self.sky_uniform_buffer,
             0,
@@ -833,7 +855,7 @@ impl SceneRenderer {
                     SKY_PITCH_RADIANS,
                 ],
                 camera_origin: [camera.x as f32, CAMERA_HEIGHT, camera.y as f32, plane_len],
-                camera_forward: [camera.dir_x as f32, 0.0, camera.dir_y as f32, 0.0],
+                camera_forward: [fwd.x, fwd.y, fwd.z, 0.0],
                 camera_right: [right.x, right.y, right.z, 0.0],
             }),
         );

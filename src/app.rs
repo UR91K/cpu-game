@@ -74,6 +74,7 @@ pub struct App {
     ignore_next_motion: bool,
     pending_fire: bool,
     pending_rotation_delta: f64,
+    camera_pitch: f64,
     last_submitted_input: Option<InputMessage>,
     mouse_motion_events: u64,
     ignored_mouse_motion_events: u64,
@@ -111,6 +112,7 @@ impl App {
             ignore_next_motion: false,
             pending_fire: false,
             pending_rotation_delta: 0.0,
+            camera_pitch: 0.0,
             last_submitted_input: None,
             mouse_motion_events: 0,
             ignored_mouse_motion_events: 0,
@@ -516,6 +518,7 @@ impl App {
                 &snapshot.game_state,
                 viewer_id.expect("viewer id should exist when snapshot is present"),
                 self.fov_plane_len,
+                self.camera_pitch,
             )
         });
 
@@ -626,7 +629,6 @@ impl App {
                 state.renderer = SceneRenderer::new(
                     state.renderer.device.clone(),
                     state.renderer.queue.clone(),
-                    self.runtime.level(),
                     &state.texture_manager,
                     state.surface_config.format,
                     scene_width,
@@ -649,7 +651,6 @@ impl App {
         state.renderer = SceneRenderer::new(
             state.renderer.device.clone(),
             state.renderer.queue.clone(),
-            self.runtime.level(),
             &state.texture_manager,
             state.surface_config.format,
             scene_width,
@@ -708,7 +709,6 @@ impl ApplicationHandler for App {
         let renderer = SceneRenderer::new(
             device.clone(),
             queue.clone(),
-            self.runtime.level(),
             &texture_manager,
             surface_format,
             scene_width,
@@ -844,7 +844,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if self.mouse_capture_mode != MouseCaptureMode::None {
-            if let DeviceEvent::MouseMotion { delta: (dx, _dy) } = event {
+            if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
                 self.mouse_motion_events += 1;
                 self.last_mouse_dx = dx;
                 if self.ignore_next_motion {
@@ -853,6 +853,9 @@ impl ApplicationHandler for App {
                     return;
                 }
                 self.push_rotation(-dx * self.mouse_sensitivity);
+                const PITCH_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 0.05;
+                self.camera_pitch =
+                    (self.camera_pitch - dy * self.mouse_sensitivity).clamp(-PITCH_LIMIT, PITCH_LIMIT);
             }
         }
     }
