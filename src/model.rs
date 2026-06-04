@@ -41,10 +41,16 @@ pub enum EntityKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
+    /// World-space X (horizontal).
     pub x: f64,
+    /// World-space Z (horizontal depth). Named `y` for legacy reasons; maps to world Z.
     pub y: f64,
+    /// World-space Y (vertical, up). 0 = floor level.
+    pub z: f64,
     pub vel_x: f64,
     pub vel_y: f64,
+    /// Vertical velocity (world Y). Positive = moving up.
+    pub vel_z: f64,
     pub radius: f64,
     pub render: Option<RenderBody>,
     pub kind: EntityKind,

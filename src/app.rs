@@ -73,6 +73,7 @@ pub struct App {
     mouse_capture_mode: MouseCaptureMode,
     ignore_next_motion: bool,
     pending_fire: bool,
+    pending_jump: bool,
     pending_rotation_delta: f64,
     camera_pitch: f64,
     last_submitted_input: Option<InputMessage>,
@@ -111,6 +112,7 @@ impl App {
             mouse_capture_mode: MouseCaptureMode::None,
             ignore_next_motion: false,
             pending_fire: false,
+            pending_jump: false,
             pending_rotation_delta: 0.0,
             camera_pitch: 0.0,
             last_submitted_input: None,
@@ -194,6 +196,7 @@ impl App {
             strafe_left: self.keys.contains(&KeyCode::KeyA),
             strafe_right: self.keys.contains(&KeyCode::KeyD),
             fire: std::mem::take(&mut self.pending_fire),
+            jump: std::mem::take(&mut self.pending_jump),
             rotate_delta: std::mem::take(&mut self.pending_rotation_delta),
         };
         self.last_submitted_input = Some(msg.clone());
@@ -768,7 +771,7 @@ impl ApplicationHandler for App {
                     }
 
                     if code == KeyCode::Space && event.state == ElementState::Pressed {
-                        self.pending_fire = true;
+                        self.pending_jump = true;
                     }
 
                     if code == KeyCode::F11 && event.state == ElementState::Pressed {

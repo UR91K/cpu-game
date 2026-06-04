@@ -109,6 +109,7 @@ pub fn start_udp_client_transport(
             let mut latest_input = InputMessage::default();
             let mut pending_rotate_delta = 0.0;
             let mut pending_fire = false;
+            let mut pending_jump = false;
             let mut saw_fresh_input = false;
 
             loop {
@@ -136,6 +137,7 @@ pub fn start_udp_client_transport(
                 while let Ok(input) = input_rx.try_recv() {
                     pending_rotate_delta += input.rotate_delta;
                     pending_fire |= input.fire;
+                    pending_jump |= input.jump;
                     latest_input = merge_stateful_input(latest_input, input);
                     saw_fresh_input = true;
                 }
@@ -143,26 +145,27 @@ pub fn start_udp_client_transport(
                 let now = Instant::now();
                 if now >= next_send {
                     let packet_sequence = send_sequence;
-                    let mut packet_input = latest_input.clone();
-                    if saw_fresh_input {
-                        packet_input.rotate_delta = pending_rotate_delta;
-                        packet_input.fire = pending_fire;
-                    } else {
-                        packet_input.rotate_delta = 0.0;
-                        packet_input.fire = false;
-                    }
+                    let had_fresh_input = saw_fresh_input;
+                    let packet_input = build_packet_input(
+                        &latest_input,
+                        pending_rotate_delta,
+                        pending_fire,
+                        pending_jump,
+                        had_fresh_input,
+                    );
                     let packet = ClientPacket {
                         header: PacketHeader {
                             sequence: packet_sequence,
                             ack: recv_tracker.ack(),
                             ack_bits: recv_tracker.ack_bits(),
                         },
-                        input: packet_input,
+                        input: packet_input.clone(),
                         reliable: reliable.collect_for_send(packet_sequence),
                     };
                     send_sequence = send_sequence.wrapping_add(1);
                     pending_rotate_delta = 0.0;
                     pending_fire = false;
+                    pending_jump = false;
                     saw_fresh_input = false;
 
                     if let Ok(bytes) = serialize(&packet) {
@@ -321,10 +324,64 @@ fn merge_stateful_input(mut current: InputMessage, latest: InputMessage) -> Inpu
     current
 }
 
+fn build_packet_input(
+    latest_input: &InputMessage,
+    pending_rotate_delta: f64,
+    pending_fire: bool,
+    pending_jump: bool,
+    saw_fresh_input: bool,
+) -> InputMessage {
+    let mut packet_input = latest_input.clone();
+    if saw_fresh_input {
+        packet_input.rotate_delta = pending_rotate_delta;
+        packet_input.fire = pending_fire;
+        packet_input.jump = pending_jump;
+    } else {
+        packet_input.rotate_delta = 0.0;
+        packet_input.fire = false;
+        packet_input.jump = false;
+    }
+    packet_input
+}
+
 fn serialize<T: Serialize>(message: &T) -> io::Result<Vec<u8>> {
     bincode::serialize(message).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
 fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> io::Result<T> {
     bincode::deserialize(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::input::InputMessage;
+
+    use super::build_packet_input;
+
+    #[test]
+    fn build_packet_input_latches_jump_like_fire() {
+        let latest = InputMessage {
+            controller_id: 7,
+            tick: 11,
+            forward: true,
+            ..InputMessage::default()
+        };
+
+        let packet_input = build_packet_input(&latest, 0.3, true, true, true);
+
+        assert_eq!(packet_input.tick, 11);
+        assert!(packet_input.forward);
+        assert!(packet_input.fire);
+        assert!(packet_input.jump);
+        assert!((packet_input.rotate_delta - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn keepalive_packet_clears_edge_triggered_actions() {
+        let packet_input = build_packet_input(&InputMessage::default(), 0.4, true, true, false);
+
+        assert_eq!(packet_input.rotate_delta, 0.0);
+        assert!(!packet_input.fire);
+        assert!(!packet_input.jump);
+    }
 }

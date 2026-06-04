@@ -50,7 +50,7 @@ fn build_view_projection(camera: &RenderCamera, scene_width: u32, scene_height: 
     // plane_len is tan(half_hfov), convert to vfov for perspective_lh
     let vfov = 2.0 * (plane_len / aspect).atan();
 
-    let eye = Vec3::new(camera.x as f32, CAMERA_HEIGHT, camera.y as f32);
+    let eye = Vec3::new(camera.x as f32, camera.z as f32 + CAMERA_HEIGHT, camera.y as f32);
     let yaw_forward = Vec3::new(camera.dir_x as f32, 0.0, camera.dir_y as f32);
     // Pitch: tilt the forward vector up/down around the camera's right axis.
     let pitch = camera.pitch as f32;
@@ -854,7 +854,7 @@ impl SceneRenderer {
                     self.scene_height as f32,
                     SKY_PITCH_RADIANS,
                 ],
-                camera_origin: [camera.x as f32, CAMERA_HEIGHT, camera.y as f32, plane_len],
+                camera_origin: [camera.x as f32, camera.z as f32 + CAMERA_HEIGHT, camera.y as f32, plane_len],
                 camera_forward: [fwd.x, fwd.y, fwd.z, 0.0],
                 camera_right: [right.x, right.y, right.z, 0.0],
             }),

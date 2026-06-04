@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::clock::ClockManager;
 use crate::input::{InputMessage, SharedInputHistory};
 use crate::model::{ControllerId, EntityId, Level};
-use crate::simulation::{GameState, TICK_DT, tick};
+use crate::simulation::{GameState, TICK_DT, TICK_RATE, tick};
 use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -184,6 +184,10 @@ impl ChannelClientRuntime {
         let authoritative = self.client.snapshot()?;
         let local_controller_id = authoritative.local_controller_id?;
         let acked_input_tick = self.last_acked_input_tick;
+        // Cap replayed inputs to one second of ticks. Without this, a stale pending queue
+        // (e.g. from inputs accumulating while the server process is starting) can replay
+        // an entire jump arc in a single prediction pass, making the jump appear instant.
+        const MAX_PENDING: usize = TICK_RATE as usize;
         let pending_inputs = self
             .pending_inputs
             .lock()
@@ -195,16 +199,23 @@ impl ChannelClientRuntime {
             .cloned()
             .collect::<Vec<_>>();
 
+        // Take only the most recent MAX_PENDING inputs so old stale entries don't replay
+        // completed physics arcs.
+        let pending_inputs = if pending_inputs.len() > MAX_PENDING {
+            pending_inputs[pending_inputs.len() - MAX_PENDING..].to_vec()
+        } else {
+            pending_inputs
+        };
+
         if pending_inputs.is_empty() {
             return None;
         }
 
         let mut predicted = authoritative.clone();
-        predicted.game_state = tick(
+        predicted.game_state = replay_predicted_inputs(
             &authoritative.game_state,
             &pending_inputs,
             self.client.level(),
-            TICK_DT,
         );
         predicted.authoritative_tick = authoritative.authoritative_tick;
         predicted.prediction_debug = Some(PredictionDebug {
@@ -275,6 +286,14 @@ impl GameRuntime for ClockManager {
     }
 }
 
+fn replay_predicted_inputs(state: &GameState, pending_inputs: &[InputMessage], level: &Level) -> GameState {
+    let mut predicted = state.clone();
+    for input in pending_inputs {
+        predicted = tick(&predicted, std::slice::from_ref(input), level, TICK_DT);
+    }
+    predicted
+}
+
 fn interpolate_snapshot(
     previous: &ClientSnapshot,
     current: &ClientSnapshot,
@@ -290,8 +309,10 @@ fn interpolate_snapshot(
 
         entity.x = lerp(previous_entity.x, entity.x, alpha);
         entity.y = lerp(previous_entity.y, entity.y, alpha);
+        entity.z = lerp(previous_entity.z, entity.z, alpha);
         entity.vel_x = lerp(previous_entity.vel_x, entity.vel_x, alpha);
         entity.vel_y = lerp(previous_entity.vel_y, entity.vel_y, alpha);
+        entity.vel_z = lerp(previous_entity.vel_z, entity.vel_z, alpha);
     }
 
     for (controller_id, player) in &mut blended.game_state.players {
@@ -313,4 +334,38 @@ fn interpolate_snapshot(
 
 fn lerp(start: f64, end: f64, alpha: f64) -> f64 {
     start + (end - start) * alpha
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::input::InputMessage;
+    use crate::model::Level;
+    use crate::simulation::{GameState, Player};
+
+    use super::replay_predicted_inputs;
+
+    #[test]
+    fn replay_predicted_inputs_advances_one_tick_per_pending_input() {
+        let level = Level::new(vec![vec![0, 0], vec![0, 0]]);
+        let mut state = GameState::new();
+        let pawn_id = state.spawn_pawn(0.5, 0.5, Some(1));
+        state.players.insert(1, Player::new(pawn_id));
+
+        let pending_inputs = vec![
+            InputMessage {
+                controller_id: 1,
+                jump: true,
+                ..InputMessage::default()
+            },
+            InputMessage {
+                controller_id: 1,
+                forward: true,
+                ..InputMessage::default()
+            },
+        ];
+
+        let predicted = replay_predicted_inputs(&state, &pending_inputs, &level);
+
+        assert_eq!(predicted.tick, state.tick + pending_inputs.len() as u64);
+    }
 }

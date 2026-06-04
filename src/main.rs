@@ -135,8 +135,8 @@ fn run_client(options: ClientLaunchOptions) {
     let texture_manager = texture::TextureManager::load();
 
     const HUMAN_ID: u64 = 1;
-    let transport = net::udp::connect_client(requested_server_addr);
     let pending_inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let transport = net::udp::connect_client(requested_server_addr);
     let client_runtime = ChannelClientRuntime::new(
         Arc::clone(&level),
         transport.update_rx,

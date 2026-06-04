@@ -14,6 +14,8 @@ pub struct RenderScene {
 pub struct RenderCamera {
     pub x: f64,
     pub y: f64,
+    /// Entity's vertical position (world Y). Eye height is added on top of this in the renderer.
+    pub z: f64,
     pub dir_x: f64,
     pub dir_y: f64,
     pub plane_x: f64,
@@ -50,6 +52,7 @@ pub fn assemble_scene(
     let camera = RenderCamera {
         x: pawn.x,
         y: pawn.y,
+        z: pawn.z,
         dir_x: player.dir_x,
         dir_y: player.dir_y,
         plane_x,

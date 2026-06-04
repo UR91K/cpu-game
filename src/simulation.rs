@@ -7,11 +7,13 @@ use crate::input::InputMessage;
 use crate::model::{ControllerId, Entity, EntityId, EntityKind, Level, PickupKind, RenderBody};
 use crate::texture::{VisualId, visual_definition};
 
+/// 1 unit = 10 cm.
+
 pub const PLAYER_RADIUS: f64 = 0.2;
 pub const TICK_RATE: u64 = 64;
 pub const TICK_DT: f64 = 1.0 / TICK_RATE as f64;
-pub const MOVE_SPEED: f64 = 40.0;
-pub const FRICTION: f64 = 10.0;
+pub const PLAYER_ACCEL: f64 = 40.0;
+pub const GROUND_FRICTION: f64 = 10.0;
 const STATIC_PROP_RADIUS: f64 = 0.28;
 const PICKUP_RADIUS: f64 = 0.2;
 const PROJECTILE_RADIUS: f64 = 0.08;
@@ -19,6 +21,8 @@ const PROJECTILE_SPEED: f64 = 18.0;
 const PROJECTILE_TTL_TICKS: u32 = 96;
 const PROJECTILE_DAMAGE: u32 = 1;
 const EPSILON: f64 = 1e-6;
+const GRAVITY: f64 = 0.98;   // units/s² (world Y, downward)
+const JUMP_IMPULSE: f64 = 2.0; // units/s upward
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
@@ -69,8 +73,10 @@ impl GameState {
                 id,
                 x,
                 y,
+                z: 0.0,
                 vel_x: 0.0,
                 vel_y: 0.0,
+                vel_z: 0.0,
                 radius: PLAYER_RADIUS,
                 render: Some(render_body(VisualId::PlayerPawn)),
                 kind: EntityKind::Pawn { owner_id },
@@ -87,8 +93,10 @@ impl GameState {
                 id,
                 x,
                 y,
+                z: 0.0,
                 vel_x: 0.0,
                 vel_y: 0.0,
+                vel_z: 0.0,
                 radius: STATIC_PROP_RADIUS,
                 render: Some(render_body(VisualId::StaticProp)),
                 kind: EntityKind::StaticProp {
@@ -107,8 +115,10 @@ impl GameState {
                 id,
                 x,
                 y,
+                z: 0.0,
                 vel_x: 0.0,
                 vel_y: 0.0,
+                vel_z: 0.0,
                 radius: PICKUP_RADIUS,
                 render: Some(render_body(VisualId::Pickup)),
                 kind: EntityKind::Pickup { pickup_kind },
@@ -127,6 +137,7 @@ impl GameState {
         let dir_y = player.dir_y;
         let pawn_x = pawn.x;
         let pawn_y = pawn.y;
+        let pawn_z = pawn.z;
         let pawn_radius = pawn.radius;
         let spawn_distance = pawn_radius + PROJECTILE_RADIUS + 0.05;
         let spawn_x = pawn_x + dir_x * spawn_distance;
@@ -139,8 +150,10 @@ impl GameState {
                 id,
                 x: spawn_x,
                 y: spawn_y,
+                z: pawn_z,
                 vel_x: dir_x * PROJECTILE_SPEED,
                 vel_y: dir_y * PROJECTILE_SPEED,
+                vel_z: 0.0,
                 radius: PROJECTILE_RADIUS,
                 render: Some(render_body(VisualId::Projectile)),
                 kind: EntityKind::Projectile {
@@ -161,8 +174,10 @@ impl GameState {
         let entity = self.entities.get_mut(&entity_id)?;
         entity.x = x;
         entity.y = y;
+        entity.z = 0.0;
         entity.vel_x = 0.0;
         entity.vel_y = 0.0;
+        entity.vel_z = 0.0;
         Some(())
     }
 
@@ -238,18 +253,23 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, level: &Level, d
         return;
     };
 
-    pawn.vel_x += move_dir_x * MOVE_SPEED * delta;
-    pawn.vel_y += move_dir_y * MOVE_SPEED * delta;
+    pawn.vel_x += move_dir_x * PLAYER_ACCEL * delta;
+    pawn.vel_y += move_dir_y * PLAYER_ACCEL * delta;
 
     let speed_sq = pawn.vel_x * pawn.vel_x + pawn.vel_y * pawn.vel_y;
     if speed_sq > 0.0 {
         let speed = speed_sq.sqrt();
-        let drop = speed * FRICTION * delta;
+        let drop = speed * GROUND_FRICTION * delta;
         let new_speed = (speed - drop).max(0.0);
         if new_speed < speed {
             pawn.vel_x *= new_speed / speed;
             pawn.vel_y *= new_speed / speed;
         }
+    }
+
+    // Jump: only allowed when on the ground (z == 0 for now; triangle collision will refine this)
+    if input.jump && pawn.z <= 0.0 && pawn.vel_z <= 0.0 {
+        pawn.vel_z = JUMP_IMPULSE;
     }
 
     move_dynamic_entity(state, pawn_id, level, delta);
@@ -281,6 +301,16 @@ fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level
     let mut vel_y = snapshot.vel_y;
     let radius = snapshot.radius;
 
+    // Vertical: apply gravity then integrate position.
+    let mut vel_z = snapshot.vel_z - GRAVITY * delta;
+    let mut z = snapshot.z + vel_z * delta;
+
+    // Floor clamp at y=0 — triangle collision will replace this later.
+    if z <= 0.0 {
+        z = 0.0;
+        vel_z = 0.0;
+    }
+
     let blockers: Vec<(f64, f64, f64)> = state
         .entities
         .values()
@@ -294,8 +324,10 @@ fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level
     if let Some(entity) = state.entities.get_mut(&entity_id) {
         entity.x = x;
         entity.y = y;
+        entity.z = z;
         entity.vel_x = vel_x;
         entity.vel_y = vel_y;
+        entity.vel_z = vel_z;
     }
 }
 
