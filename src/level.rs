@@ -79,5 +79,7 @@ fn level_from_binary(data: &[u8]) -> Result<Level, String> {
         floor_tiles.push(floor_row);
     }
 
-    Ok(Level::with_floor_tiles(tiles, floor_tiles))
+    let mut level = Level::with_floor_tiles(tiles, floor_tiles);
+    level.tris = crate::map::build_test_map_tris();
+    Ok(level)
 }

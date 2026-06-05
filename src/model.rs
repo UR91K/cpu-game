@@ -3,6 +3,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::texture::{AnimationStyle, FacingMode, FloorTexture, VisualId};
 
+/// A single collision triangle — world-space, outward-facing normal.
+#[derive(Clone, Debug)]
+pub struct MapTri {
+    pub a: [f32; 3],
+    pub b: [f32; 3],
+    pub c: [f32; 3],
+    pub normal: [f32; 3],
+}
+
+impl MapTri {
+    pub fn new(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Self {
+        let ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+        let ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+        let nx = ab[1]*ac[2] - ab[2]*ac[1];
+        let ny = ab[2]*ac[0] - ab[0]*ac[2];
+        let nz = ab[0]*ac[1] - ab[1]*ac[0];
+        let len = (nx*nx + ny*ny + nz*nz).sqrt().max(1e-10);
+        Self { a, b, c, normal: [nx/len, ny/len, nz/len] }
+    }
+}
+
 pub type ControllerId = u64;
 pub type EntityId = u64;
 
@@ -54,12 +75,15 @@ pub struct Entity {
     pub radius: f64,
     pub render: Option<RenderBody>,
     pub kind: EntityKind,
+    #[serde(default)]
+    pub on_ground: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct Level {
     pub tiles: Vec<Vec<u8>>,
     pub floor_tiles: Vec<Vec<FloorTexture>>,
+    pub tris: Vec<MapTri>,
 }
 
 impl Level {
@@ -67,7 +91,7 @@ impl Level {
         let height = tiles.len();
         let width = tiles.first().map_or(0, |row| row.len());
         let floor_tiles = vec![vec![FloorTexture::Smooth; width]; height];
-        Self { tiles, floor_tiles }
+        Self { tiles, floor_tiles, tris: Vec::new() }
     }
 
     pub fn with_floor_tiles(tiles: Vec<Vec<u8>>, floor_tiles: Vec<Vec<FloorTexture>>) -> Self {
@@ -83,7 +107,7 @@ impl Level {
                 "floor tile column count must match level tiles"
             );
         }
-        Self { tiles, floor_tiles }
+        Self { tiles, floor_tiles, tris: Vec::new() }
     }
 
     pub fn is_wall(&self, x: usize, y: usize) -> bool {

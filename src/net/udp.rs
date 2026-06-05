@@ -290,7 +290,7 @@ fn create_client_slot(server: &mut super::server::Server, addr: SocketAddr) -> U
         update_tx,
         Arc::clone(&transport_state),
     );
-    server.add_controller(Box::new(controller), 21.0, 11.0);
+    server.add_controller(Box::new(controller), 0.0, -8.0, 0.5);
 
     UdpClientSlot {
         addr,

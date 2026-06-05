@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::input::InputMessage;
-use crate::model::{ControllerId, Entity, EntityId, EntityKind, Level, PickupKind, RenderBody};
+use crate::model::{ControllerId, Entity, EntityId, EntityKind, Level, MapTri, PickupKind, RenderBody};
 use crate::texture::{VisualId, visual_definition};
 
 /// 1 unit = 10 cm.
@@ -65,7 +65,7 @@ impl GameState {
         id
     }
 
-    pub fn spawn_pawn(&mut self, x: f64, y: f64, owner_id: Option<ControllerId>) -> EntityId {
+    pub fn spawn_pawn(&mut self, x: f64, y: f64, z: f64, owner_id: Option<ControllerId>) -> EntityId {
         let id = self.allocate_entity_id();
         self.entities.insert(
             id,
@@ -73,13 +73,14 @@ impl GameState {
                 id,
                 x,
                 y,
-                z: 0.0,
+                z,
                 vel_x: 0.0,
                 vel_y: 0.0,
                 vel_z: 0.0,
                 radius: PLAYER_RADIUS,
                 render: Some(render_body(VisualId::PlayerPawn)),
                 kind: EntityKind::Pawn { owner_id },
+                on_ground: true,
             },
         );
         id
@@ -102,6 +103,7 @@ impl GameState {
                 kind: EntityKind::StaticProp {
                     blocks_movement: true,
                 },
+                on_ground: false,
             },
         );
         id
@@ -122,6 +124,7 @@ impl GameState {
                 radius: PICKUP_RADIUS,
                 render: Some(render_body(VisualId::Pickup)),
                 kind: EntityKind::Pickup { pickup_kind },
+                on_ground: false,
             },
         );
         id
@@ -161,6 +164,7 @@ impl GameState {
                     ttl_ticks: PROJECTILE_TTL_TICKS,
                     damage: PROJECTILE_DAMAGE,
                 },
+                on_ground: false,
             },
         );
         Some(id)
@@ -267,8 +271,7 @@ pub fn apply_input(state: &mut GameState, input: &InputMessage, level: &Level, d
         }
     }
 
-    // Jump: only allowed when on the ground (z == 0 for now; triangle collision will refine this)
-    if input.jump && pawn.z <= 0.0 && pawn.vel_z <= 0.0 {
+    if input.jump && pawn.on_ground {
         pawn.vel_z = JUMP_IMPULSE;
     }
 
@@ -305,10 +308,26 @@ fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level
     let mut vel_z = snapshot.vel_z - GRAVITY * delta;
     let mut z = snapshot.z + vel_z * delta;
 
-    // Floor clamp at y=0 — triangle collision will replace this later.
-    if z <= 0.0 {
-        z = 0.0;
-        vel_z = 0.0;
+    let mut on_ground = false;
+
+    if level.tris.is_empty() {
+        // Fallback when no triangle geometry (e.g. unit tests).
+        if z <= 0.0 {
+            z = 0.0;
+            vel_z = vel_z.max(0.0);
+            on_ground = true;
+        }
+    } else {
+        let r = radius as f32;
+        // Sphere center in map space: map(x, y_up, z_depth) = physics(x, z+r, y)
+        let mut cx = x as f32;
+        let mut cy = (z + radius) as f32;
+        let mut cz = y as f32;
+        depenetrate_tris(&level.tris, &mut cx, &mut cy, &mut cz,
+                         &mut vel_x, &mut vel_y, &mut vel_z, r, &mut on_ground);
+        x = cx as f64;
+        y = cz as f64;
+        z = cy as f64 - radius;
     }
 
     let blockers: Vec<(f64, f64, f64)> = state
@@ -318,7 +337,6 @@ fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level
         .map(|entity| (entity.x, entity.y, entity.radius))
         .collect();
 
-    depenetrate_walls(level, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
     depenetrate_entities(&blockers, &mut x, &mut y, &mut vel_x, &mut vel_y, radius);
 
     if let Some(entity) = state.entities.get_mut(&entity_id) {
@@ -328,65 +346,127 @@ fn move_dynamic_entity(state: &mut GameState, entity_id: EntityId, level: &Level
         entity.vel_x = vel_x;
         entity.vel_y = vel_y;
         entity.vel_z = vel_z;
+        entity.on_ground = on_ground;
     }
 }
 
-fn depenetrate_walls(
-    level: &Level,
-    x: &mut f64,
-    y: &mut f64,
+fn depenetrate_tris(
+    tris: &[MapTri],
+    cx: &mut f32,
+    cy: &mut f32,
+    cz: &mut f32,
     vel_x: &mut f64,
     vel_y: &mut f64,
-    radius: f64,
+    vel_z: &mut f64,
+    radius: f32,
+    on_ground: &mut bool,
 ) {
-    let level_h = level.tiles.len() as i32;
-    let level_w = if level_h > 0 {
-        level.tiles[0].len() as i32
-    } else {
-        0
-    };
+    for _ in 0..3 {
+        for tri in tris {
+            let Some((nx, ny, nz, pen)) = sphere_vs_tri([*cx, *cy, *cz], radius, tri) else {
+                continue;
+            };
+            *cx += nx * pen;
+            *cy += ny * pen;
+            *cz += nz * pen;
 
-    for _ in 0..2 {
-        let cx = x.floor() as i32;
-        let cy = y.floor() as i32;
-        for oy in -1..=1i32 {
-            for ox in -1..=1i32 {
-                let tx = cx + ox;
-                let ty = cy + oy;
-                if tx < 0 || ty < 0 || tx >= level_w || ty >= level_h {
-                    continue;
-                }
-                if !level.is_wall(tx as usize, ty as usize) {
-                    continue;
-                }
+            // Velocity sliding: physics vel_map = [vel_x, vel_z, vel_y] (x→x, z↔y)
+            let vx = *vel_x as f32;
+            let vy = *vel_z as f32;
+            let vz = *vel_y as f32;
+            let vdotn = vx * nx + vy * ny + vz * nz;
+            if vdotn < 0.0 {
+                *vel_x -= (nx * vdotn) as f64;
+                *vel_z -= (ny * vdotn) as f64;
+                *vel_y -= (nz * vdotn) as f64;
+            }
 
-                let cpx = (*x).clamp(tx as f64, (tx + 1) as f64);
-                let cpy = (*y).clamp(ty as f64, (ty + 1) as f64);
-                let nx = *x - cpx;
-                let ny = *y - cpy;
-                let dist_sq = nx * nx + ny * ny;
-                if dist_sq >= radius * radius {
-                    continue;
-                }
-
-                let dist = dist_sq.sqrt();
-                let (nx, ny) = if dist < EPSILON {
-                    (1.0_f64, 0.0_f64)
-                } else {
-                    (nx / dist, ny / dist)
-                };
-                let penetration = radius - dist;
-                *x += nx * penetration;
-                *y += ny * penetration;
-
-                let vel_dot_n = *vel_x * nx + *vel_y * ny;
-                if vel_dot_n < 0.0 {
-                    *vel_x -= nx * vel_dot_n;
-                    *vel_y -= ny * vel_dot_n;
-                }
+            if ny > 0.7 {
+                *on_ground = true;
             }
         }
     }
+}
+
+/// Returns (push_nx, push_ny, push_nz, penetration) if sphere penetrates the triangle.
+/// Map surfaces are treated as two-sided because the current test geometry is a shell mesh,
+/// not closed solid volumes with thickness.
+fn sphere_vs_tri(center: [f32; 3], radius: f32, tri: &MapTri) -> Option<(f32, f32, f32, f32)> {
+    let n = tri.normal;
+    let d = (center[0] - tri.a[0]) * n[0]
+          + (center[1] - tri.a[1]) * n[1]
+          + (center[2] - tri.a[2]) * n[2];
+    if d.abs() > radius {
+        return None;
+    }
+
+    let closest = closest_pt_on_tri(center, tri.a, tri.b, tri.c);
+    let dx = center[0] - closest[0];
+    let dy = center[1] - closest[1];
+    let dz = center[2] - closest[2];
+    let dist_sq = dx * dx + dy * dy + dz * dz;
+    if dist_sq >= radius * radius {
+        return None;
+    }
+
+    let dist = dist_sq.sqrt();
+    let (nx, ny, nz) = if dist < 1e-6 {
+        (n[0], n[1], n[2])
+    } else {
+        (dx / dist, dy / dist, dz / dist)
+    };
+    Some((nx, ny, nz, radius - dist))
+}
+
+/// Closest point on triangle (a, b, c) to point p — Ericson barycentric method.
+fn closest_pt_on_tri(p: [f32; 3], a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+    let ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+    let ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+    let ap = [p[0]-a[0], p[1]-a[1], p[2]-a[2]];
+
+    let d1 = dot3(ab, ap);
+    let d2 = dot3(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 { return a; }
+
+    let bp = [p[0]-b[0], p[1]-b[1], p[2]-b[2]];
+    let d3 = dot3(ab, bp);
+    let d4 = dot3(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 { return b; }
+
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let v = d1 / (d1 - d3);
+        return [a[0]+ab[0]*v, a[1]+ab[1]*v, a[2]+ab[2]*v];
+    }
+
+    let cp = [p[0]-c[0], p[1]-c[1], p[2]-c[2]];
+    let d5 = dot3(ab, cp);
+    let d6 = dot3(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 { return c; }
+
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let w = d2 / (d2 - d6);
+        return [a[0]+ac[0]*w, a[1]+ac[1]*w, a[2]+ac[2]*w];
+    }
+
+    let va = d3 * d6 - d5 * d4;
+    let d34 = d3 - d4;
+    let d65 = d6 - d5;
+    if va <= 0.0 && d34 >= 0.0 && d65 >= 0.0 {
+        let bc = [c[0]-b[0], c[1]-b[1], c[2]-b[2]];
+        let w = d34 / (d34 + d65);
+        return [b[0]+bc[0]*w, b[1]+bc[1]*w, b[2]+bc[2]*w];
+    }
+
+    let denom = 1.0 / (va + vb + vc);
+    let v = vb * denom;
+    let w = vc * denom;
+    [a[0]+ab[0]*v+ac[0]*w, a[1]+ab[1]*v+ac[1]*w, a[2]+ab[2]*v+ac[2]*w]
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
 }
 
 fn depenetrate_entities(
@@ -599,9 +679,9 @@ fn blocks_movement(entity: &Entity) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameState, Player, TICK_DT, apply_input};
+    use super::{GameState, Player, TICK_DT, apply_input, sphere_vs_tri};
     use crate::input::InputMessage;
-    use crate::model::Level;
+    use crate::model::{Level, MapTri};
 
     #[test]
     fn diagonal_movement_matches_straight_line_speed() {
@@ -663,9 +743,21 @@ mod tests {
         assert_eq!(pawn.vel_y, 0.0);
     }
 
+    #[test]
+    fn wall_triangle_blocks_from_both_sides() {
+        let tri = MapTri::new([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 1.0]);
+        let radius = 0.2;
+
+        let from_positive_x = sphere_vs_tri([0.1, 0.5, 0.5], radius, &tri);
+        let from_negative_x = sphere_vs_tri([-0.1, 0.5, 0.5], radius, &tri);
+
+        assert!(from_positive_x.is_some());
+        assert!(from_negative_x.is_some());
+    }
+
     fn make_state() -> GameState {
         let mut state = GameState::new();
-        let pawn_id = state.spawn_pawn(2.5, 2.5, Some(1));
+        let pawn_id = state.spawn_pawn(2.5, 2.5, 0.0, Some(1));
         state.players.insert(1, Player::new(pawn_id));
         state
     }

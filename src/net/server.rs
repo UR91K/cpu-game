@@ -28,9 +28,10 @@ impl Server {
         mut controller: Box<dyn Controller>,
         spawn_x: f64,
         spawn_y: f64,
+        spawn_z: f64,
     ) {
         let id = controller.id();
-        let pawn_id = self.state.spawn_pawn(spawn_x, spawn_y, Some(id));
+        let pawn_id = self.state.spawn_pawn(spawn_x, spawn_y, spawn_z, Some(id));
         self.state.players.insert(id, Player::new(pawn_id));
         // send initial state so the client is aware of the world
         controller.receive_state(&self.state);
@@ -74,10 +75,10 @@ impl Server {
         self.state.spawn_pickup(x, y, pickup_kind);
     }
 
-    pub fn spawn_wanderer(&mut self, id: ControllerId, x: f64, y: f64) {
+    pub fn spawn_wanderer(&mut self, id: ControllerId, x: f64, y: f64, z: f64) {
         let bot =
             crate::net::bots::wandering::WanderingController::new(id, Arc::clone(&self.level));
-        self.add_controller(Box::new(bot), x, y);
+        self.add_controller(Box::new(bot), x, y, z);
     }
 
     pub fn allocate_controller_id(&mut self) -> u64 {
@@ -97,6 +98,6 @@ pub fn build_headless_server(level: Arc<Level>) -> Server {
 }
 
 fn populate_demo_world(server: &mut Server) {
-    server.spawn_wanderer(2, 18.0, 11.0);
-    server.spawn_pickup(15.5, 11.0, PickupKind::Medkit);
+    server.spawn_wanderer(2, 4.0, 2.0, 0.0);
+    server.spawn_pickup(-4.0, 3.0, PickupKind::Medkit);
 }

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::map::{MapMesh, MapTri, build_test_map};
+use crate::map::{MapMesh, build_test_map};
+use crate::model::MapTri;
 use crate::render_assembly::{RenderBillboard, RenderCamera};
 use crate::renderer::atlas::build_texture_atlas;
 use crate::renderer::mesh::{

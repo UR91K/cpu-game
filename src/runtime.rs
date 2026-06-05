@@ -348,7 +348,7 @@ mod tests {
     fn replay_predicted_inputs_advances_one_tick_per_pending_input() {
         let level = Level::new(vec![vec![0, 0], vec![0, 0]]);
         let mut state = GameState::new();
-        let pawn_id = state.spawn_pawn(0.5, 0.5, Some(1));
+        let pawn_id = state.spawn_pawn(0.5, 0.5, 0.0, Some(1));
         state.players.insert(1, Player::new(pawn_id));
 
         let pending_inputs = vec![
